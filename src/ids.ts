@@ -4,8 +4,9 @@ const CHILD = "(?:0[1-9]|[1-9]\\d)";
 export const ID_RE = new RegExp(`^\\d{3}(?:\\.${CHILD}){0,2}$`);
 export const SLUG_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 export const STATUS_RE = SLUG_RE;
+// The regular expression published at semver.org.
 export const SEMVER_RE =
-  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
 // An ID followed by a hyphen at the start of a folder name. Matching on the
 // separator keeps `017` from ever matching `0170`.

@@ -1,6 +1,14 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BLOCK_END, BLOCK_START, CONFIG_FILE, ISSUES_DIR, TOOL } from "./names.js";
+import {
+  BLOCK_END,
+  BLOCK_START,
+  CONFIG_FILE,
+  ISSUES_DIR,
+  ISSUE_FILE,
+  TOOL,
+} from "./names.js";
+import { LoloError } from "./errors.js";
 import type { Config } from "./config.js";
 
 /** The generated "Work items" block. Built from the config and CLI version so it cannot drift. */
@@ -12,34 +20,54 @@ export function renderBlock(config: Config, version: string): string {
     "",
     `Issues are files in this repo, managed with \`${TOOL}\`. Do not edit this block by hand; \`${TOOL} init\` regenerates it.`,
     "",
-    `- **Where:** \`${ISSUES_DIR}/<status>/<id>-<slug>/ISSUE.md\`. An issue's status is the folder it is in.`,
+    `- **Where:** \`${ISSUES_DIR}/<status>/<id>-<slug>/${ISSUE_FILE}\`. An issue's status is the folder it is in.`,
     `- **Statuses, in order:** ${statuses} (defined in \`${ISSUES_DIR}/${CONFIG_FILE}\`).`,
     "- **IDs:** `017` (a feature or goal), `017.01` (a piece of it), `017.01.01` (a buildable unit, one model session). Three levels at most. `000` is the catch-all for maintenance and bugs with no clear home. Bugs are issues with `kind: bug`.",
     "- **Never invent an ID, and never move a folder by hand.**",
     `  - Create: \`npx ${TOOL} new <slug> [--parent <id>] [--kind task|bug]\``,
     `  - Change status: \`npx ${TOOL} move <id> <status>\``,
     `  - Before finishing any work that touches issues: \`npx ${TOOL} validate\``,
-    "- **Rollup:** the `parent:` field in ISSUE.md decides what rolls up to what, not the folder name.",
-    "- **Reference files** inside an issue folder use relative paths, never `issues/<status>/...` paths.",
+    `- **Rollup:** the \`parent:\` field in ${ISSUE_FILE} decides what rolls up to what, not the folder name.`,
+    `- **Reference files** inside an issue folder use relative paths, never \`${ISSUES_DIR}/<status>/...\` paths.`,
     "- **Depot vocabulary:** level 1 is what Depot's skills call an epic; level 3 is a work item.",
     BLOCK_END,
   ].join("\n");
 }
 
-/** Replace the marked block in `text`, or append it. Content outside the markers is untouched. */
-export function upsertBlock(text: string, block: string): string {
+const count = (text: string, needle: string) => text.split(needle).length - 1;
+
+/**
+ * Replace the marked block in `text`, or append it. Everything outside the markers is kept
+ * byte for byte. Damaged markers (one missing, reversed, or repeated) throw instead of
+ * guessing, because guessing can delete the user's text.
+ */
+export function upsertBlock(text: string, block: string, name = "file"): string {
+  const starts = count(text, BLOCK_START);
+  const ends = count(text, BLOCK_END);
+  if (starts === 0 && ends === 0) {
+    if (text === "") return block + "\n";
+    const gap = text.endsWith("\n\n") ? "" : text.endsWith("\n") ? "\n" : "\n\n";
+    return text + gap + block + "\n";
+  }
   const start = text.indexOf(BLOCK_START);
   const end = text.indexOf(BLOCK_END);
-  if (start !== -1 && end > start) {
-    return text.slice(0, start) + block + text.slice(end + BLOCK_END.length);
+  if (starts !== 1 || ends !== 1 || end < start) {
+    throw new LoloError(
+      `${name} has damaged ${TOOL} markers (${BLOCK_START} and ${BLOCK_END} must each appear once, start first). Fix or remove them, then run again. Nothing was changed.`,
+    );
   }
-  if (text.trim() === "") return block + "\n";
-  return text.replace(/\s*$/, "") + "\n\n" + block + "\n";
+  return text.slice(0, start) + block + text.slice(end + BLOCK_END.length);
 }
 
-/** Write the block into AGENTS.md (created if missing) and CLAUDE.md (only if it exists). */
-export function writeBlocks(root: string, block: string): string[] {
-  const written: string[] = [];
+export interface BlockWrite {
+  name: string;
+  path: string;
+  content: string;
+}
+
+/** Work out the AGENTS.md (created if missing) and CLAUDE.md (only if it exists) updates without writing. */
+export function planBlocks(root: string, block: string): BlockWrite[] {
+  const plan: BlockWrite[] = [];
   for (const [name, create] of [
     ["AGENTS.md", true],
     ["CLAUDE.md", false],
@@ -48,8 +76,12 @@ export function writeBlocks(root: string, block: string): string[] {
     const exists = existsSync(path);
     if (!exists && !create) continue;
     const current = exists ? readFileSync(path, "utf8") : "";
-    writeFileSync(path, upsertBlock(current, block));
-    written.push(name);
+    plan.push({ name, path, content: upsertBlock(current, block, name) });
   }
-  return written;
+  return plan;
+}
+
+export function applyBlocks(plan: BlockWrite[]): string[] {
+  for (const w of plan) writeFileSync(w.path, w.content);
+  return plan.map((w) => w.name);
 }

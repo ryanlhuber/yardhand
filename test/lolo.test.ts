@@ -77,7 +77,7 @@ test("init: updates CLAUDE.md when present, refuses to overwrite config, validat
   writeFileSync(join(root, "CLAUDE.md"), "# Mine\n");
   init(root, ["backlog", "done"], "0.0.0");
   assert.match(read(root, "CLAUDE.md"), /# Mine[\s\S]*lolo:start/);
-  assert.throws(() => init(root, ["backlog", "done"], "0.0.0"), /already exists/);
+  assert.throws(() => init(root, ["backlog", "done"], "0.0.0"), /Already initialized/);
   assert.doesNotThrow(() => init(root, ["backlog", "blocked", "done"], "0.0.0", true));
   assert.throws(() => init(mkdtempSync(join(tmpdir(), "lolo-")), ["done", "backlog"], "0.0.0"), /first status/);
   assert.throws(() => init(mkdtempSync(join(tmpdir(), "lolo-")), ["backlog", "Bad Name", "done"], "0.0.0"), /kebab/);
@@ -179,7 +179,7 @@ test("validate: parent rules, including work moved to a different parent", () =>
   const top = "issues/backlog/001-one/ISSUE.md";
   writeFileSync(join(root, piece), read(root, piece).replace("kind: task", "kind: task\nparent: 001"));
   writeFileSync(join(root, top), read(root, top).replace("kind: task", "kind: task\nparent: 002"));
-  assert.match(validate(root).map((p) => p.message).join("\n"), /must not have a parent/);
+  assert.match(validate(root).map((p) => p.message).join("\n"), /must omit the parent field/);
 });
 
 test("commands find the repo root from a subfolder", () => {

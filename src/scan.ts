@@ -19,6 +19,8 @@ export interface Scan {
   unknownDirs: string[];
   /** Configured statuses with no folder. */
   missingStatuses: string[];
+  /** Configured statuses whose path exists but is not a folder, or cannot be read. */
+  badStatusPaths: string[];
 }
 
 const isDir = (p: string) => {
@@ -29,14 +31,17 @@ const isDir = (p: string) => {
   }
 };
 
-/** List every issue folder across all status folders, done included. */
+/** List every issue folder across all status folders, done included. Never throws on filesystem shape. */
 export function scan(root: string, config: Config): Scan {
   const base = join(root, ISSUES_DIR);
   const issues: IssueDir[] = [];
   const unknownDirs: string[] = [];
   const missingStatuses: string[] = [];
+  const badStatusPaths: string[] = [];
 
   for (const entry of readdirSync(base).sort()) {
+    // Dot folders (such as the lock) are tool internals, not statuses.
+    if (entry.startsWith(".")) continue;
     if (isDir(join(base, entry)) && !config.statuses.includes(entry)) {
       unknownDirs.push(entry);
     }
@@ -47,13 +52,20 @@ export function scan(root: string, config: Config): Scan {
       missingStatuses.push(status);
       continue;
     }
-    for (const folder of readdirSync(statusDir).sort()) {
+    let entries: string[];
+    try {
+      entries = readdirSync(statusDir).sort();
+    } catch {
+      badStatusPaths.push(status);
+      continue;
+    }
+    for (const folder of entries) {
       const dir = join(statusDir, folder);
       if (!isDir(dir)) continue;
       issues.push({ id: leadingId(folder), folder, status, dir });
     }
   }
-  return { issues, unknownDirs, missingStatuses };
+  return { issues, unknownDirs, missingStatuses, badStatusPaths };
 }
 
 export function allIds(s: Scan): string[] {

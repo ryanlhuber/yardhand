@@ -70,9 +70,9 @@ released-in:
 - `kind`: required, `task` or `bug`.
 - `parent`: required for levels 2 and 3 and must be the ID with its last segment removed. Omitted for level 1. See "Moving work to a different parent" for the one exception.
 - `status`: required. Must equal the name of the status folder the issue is in.
-- `assignee`: optional free text.
-- `released-in`: optional semver, set when shipped.
-- Front matter is a simple `key: value` block between `---` lines. Comments after `#` are allowed. No nesting.
+- `assignee`: optional single-line text. `lolo new` rejects an assignee that contains a newline or `#`.
+- `released-in`: optional semver (the grammar at semver.org: no leading zeros, no empty identifiers), set when shipped.
+- Front matter is a simple `key: value` block between `---` lines. A comment starts with `#` at the start of a value or after whitespace; a `#` inside a word is part of the value. No nesting. A key may appear only once. Both LF and CRLF line endings are accepted.
 
 ### Moving work to a different parent
 
@@ -80,7 +80,11 @@ The folder name and ID never change. Update `parent:` to the new parent. `parent
 
 ## Commands
 
-All commands run from the repo root or any folder below it. Lolo finds `issues/lolo.json` by walking upward.
+All commands, `init` included, run from the repo root or any folder below it. Lolo finds `issues/lolo.json` by walking upward. `init` in an already-initialized repo fails (even from a subfolder), and with `--force` it works on the existing root.
+
+`new` and `move` take an exclusive lock (`issues/.lolo-lock`, a folder created atomically) so concurrent runs cannot allocate the same ID. A lock older than 60 seconds is treated as stale. Folders under `issues/` that start with `.` are tool internals and are ignored.
+
+`move` renames the folder first, then rewrites `status:`. If the rewrite fails, it renames the folder back. A failure never leaves the folder and the field disagreeing. If the status folder is missing, `move` creates it.
 
 ### `lolo init`
 
@@ -100,9 +104,9 @@ Moves the issue folder to the status folder and rewrites `status:` in `ISSUE.md`
 
 ### `lolo validate`
 
-Checks and reports every problem with its path. Exit code 1 if there is any error, 0 otherwise.
+Checks and reports every problem with its path, and keeps going after a problem; filesystem surprises (a file where a folder should be, an `ISSUE.md` that is a folder) are reported as problems, never thrown. A folder with a bad slug still takes part in every other check. Exit code 1 if there is any error, 0 otherwise.
 
-1. `lolo.json` is valid (rules above).
+1. `lolo.json` is valid (rules above). An invalid config is reported as a problem.
 2. Every status has a folder. Every folder under `issues/` is a status or reported as unknown.
 3. Every issue folder matches `<id>-<slug>`, with a valid ID and slug.
 4. Every issue folder contains `ISSUE.md` with valid front matter.
@@ -110,8 +114,9 @@ Checks and reports every problem with its path. Exit code 1 if there is any erro
 6. `status` equals the folder's status.
 7. `kind` is `task` or `bug`.
 8. IDs are unique across all statuses.
-9. `parent` exists. A level 1 issue has no parent. For levels 2 and 3, `parent` exists and has a shallower depth.
+9. `parent` exists. A level 1 issue omits the field entirely (an empty `parent:` is an error). For levels 2 and 3, `parent` is non-empty, exists, and has a shallower depth.
 10. `released-in`, if set, is valid semver.
+11. No key appears twice in the front matter.
 
 ### Exit codes
 
@@ -128,11 +133,11 @@ Written between markers so `init` can update it:
 <!-- lolo:end -->
 ```
 
-The block is generated from `lolo.json` and the CLI version. It states: where issues live; the status words in order; the ID rules; never invent IDs; use `lolo new` and `lolo move`; run `lolo validate` before finishing; and the vocabulary mapping for Depot (level 1 is what Depot's skills call an epic, level 3 is a work item). Content outside the markers is never touched.
+Content outside the markers is kept byte for byte, including when the block is appended. If the markers are damaged (one missing, reversed, or repeated), `init` fails and changes nothing, and it checks this before writing anything else. The block is generated from `lolo.json` and the CLI version. It states: where issues live; the status words in order; the ID rules; never invent IDs; use `lolo new` and `lolo move`; run `lolo validate` before finishing; and the vocabulary mapping for Depot (level 1 is what Depot's skills call an epic, level 3 is a work item). Content outside the markers is never touched.
 
 ## Name constants
 
-The tool name, config filename, folder name, and block markers are defined in one file (`src/names.ts`) so a rename is a one-place change.
+The tool name, config filename, issues folder name, issue filename, and block markers are defined in one file (`src/names.ts`). Every message and the generated block use those constants, so a rename is a one-place change.
 
 ## Out of v1
 

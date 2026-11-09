@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import * as p from "@clack/prompts";
 import pkg from "../package.json";
 import { DEFAULT_STATUSES } from "./config.js";
-import { DEPOT_INSTALL, TOOL } from "./names.js";
+import { DEPOT_INSTALL, ISSUES_DIR, TOOL } from "./names.js";
 import { LoloError } from "./errors.js";
 import { init, moveIssue, newIssue, validate } from "./commands.js";
 import { STATUS_RE } from "./ids.js";
@@ -98,7 +98,7 @@ async function main(argv: string[]): Promise<number> {
       else throw new LoloError(`Not a terminal. Use "${TOOL} init --yes" (optionally with --statuses a,b,c).`);
       const result = init(cwd, statuses, pkg.version, values.force ?? false);
       const lines = [
-        `Created issues/ with statuses: ${result.statuses.join(", ")}`,
+        `Created ${ISSUES_DIR}/ with statuses: ${result.statuses.join(", ")}`,
         `Updated: ${result.blocks.join(", ")}`,
         "",
         "Optional: install Depot's planning and review skills with",

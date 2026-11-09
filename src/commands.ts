@@ -5,13 +5,9 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { LoloError } from "./errors.js";
-import {
-  CONFIG_FILE,
-  ISSUES_DIR,
-  ISSUE_FILE,
-} from "./names.js";
+import { CONFIG_FILE, ISSUES_DIR, ISSUE_FILE, TOOL } from "./names.js";
 import {
   type Config,
   findRoot,
@@ -32,7 +28,10 @@ import {
 } from "./ids.js";
 import { parseFrontMatter, setField } from "./frontmatter.js";
 import { renderIssue } from "./template.js";
-import { renderBlock, writeBlocks } from "./block.js";
+import { applyBlocks, planBlocks, renderBlock } from "./block.js";
+import { withLock } from "./lock.js";
+
+const errCode = (err: unknown) => (err as NodeJS.ErrnoException).code ?? "error";
 
 export interface InitResult {
   root: string;
@@ -41,20 +40,38 @@ export interface InitResult {
 }
 
 export function init(
-  root: string,
+  cwd: string,
   statuses: string[],
   version: string,
   force = false,
 ): InitResult {
   const problems = statusProblems(statuses);
   if (problems.length) throw new LoloError(problems.join(" "));
-  const configPath = join(root, ISSUES_DIR, CONFIG_FILE);
-  if (existsSync(configPath) && !force) {
-    throw new LoloError(`${ISSUES_DIR}/${CONFIG_FILE} already exists. Use --force to overwrite it.`);
+
+  // Like every other command, init works from the existing root when there is one.
+  let existing: string | null = null;
+  try {
+    existing = findRoot(cwd);
+  } catch {
+    // Not initialized yet, which is the normal case.
   }
+  if (existing && !force) {
+    const where = relative(resolve(cwd), existing);
+    throw new LoloError(
+      `Already initialized${where ? ` at ${where}` : ""} (${ISSUES_DIR}/${CONFIG_FILE} exists). Use --force to overwrite the config.`,
+    );
+  }
+  const root = existing ?? resolve(cwd);
+
   const config: Config = { statuses };
+  // Plan the AGENTS.md / CLAUDE.md updates first: damaged markers must fail before anything is written.
+  const plan = planBlocks(root, renderBlock(config, version));
+
   mkdirSync(join(root, ISSUES_DIR), { recursive: true });
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+  writeFileSync(
+    join(root, ISSUES_DIR, CONFIG_FILE),
+    JSON.stringify(config, null, 2) + "\n",
+  );
   for (const status of statuses) {
     const dir = join(root, ISSUES_DIR, status);
     mkdirSync(dir, { recursive: true });
@@ -62,17 +79,16 @@ export function init(
     if (!existsSync(keep)) writeFileSync(keep, "");
   }
   // 000 is the catch-all parent for maintenance and bugs with no clear home.
-  const s = scan(root, config);
-  if (!allIds(s).includes("000")) {
-    const dir = join(root, ISSUES_DIR, statuses[0] as string, folderName("000", "maintain-repo"));
+  if (!allIds(scan(root, config)).includes("000")) {
+    const first = statuses[0] as string;
+    const dir = join(root, ISSUES_DIR, first, folderName("000", "maintain-repo"));
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, ISSUE_FILE),
-      renderIssue({ id: "000", kind: "task", parent: null, status: statuses[0] as string, assignee: "" }),
+      renderIssue({ id: "000", kind: "task", parent: null, status: first, assignee: "" }),
     );
   }
-  const blocks = writeBlocks(root, renderBlock(config, version));
-  return { root, statuses, blocks };
+  return { root, statuses, blocks: applyBlocks(plan) };
 }
 
 export interface NewOptions {
@@ -90,25 +106,42 @@ export function newIssue(cwd: string, opts: NewOptions): { id: string; path: str
   }
   const kind = opts.kind ?? "task";
   if (kind !== "task" && kind !== "bug") throw new LoloError('--kind must be "task" or "bug".');
-  const s = scan(root, config);
-  const ids = allIds(s);
-  let id: string;
-  if (opts.parent) {
-    if (!isValidId(opts.parent)) throw new LoloError(`"${opts.parent}" is not a valid ID.`);
-    if (!ids.includes(opts.parent)) throw new LoloError(`Parent ${opts.parent} does not exist.`);
-    id = nextChild(opts.parent, ids);
-  } else {
-    id = nextTopLevel(ids);
+  const assignee = (opts.assignee ?? "").trim();
+  if (/[\r\n#]/.test(assignee)) {
+    throw new LoloError("--assignee must be one line and must not contain #.");
   }
-  const status = config.statuses[0] as string;
-  const dir = join(root, ISSUES_DIR, status, folderName(id, opts.slug));
-  mkdirSync(dir, { recursive: true });
-  const file = join(dir, ISSUE_FILE);
-  writeFileSync(
-    file,
-    renderIssue({ id, kind, parent: opts.parent ?? null, status, assignee: opts.assignee ?? "" }),
-  );
-  return { id, path: relative(root, file) };
+  if (opts.parent !== undefined && !isValidId(opts.parent)) {
+    throw new LoloError(`"${opts.parent}" is not a valid ID.`);
+  }
+
+  // Scan, allocate, and create under one lock so concurrent runs cannot share an ID.
+  return withLock(root, () => {
+    const ids = allIds(scan(root, config));
+    let id: string;
+    if (opts.parent) {
+      if (!ids.includes(opts.parent)) throw new LoloError(`Parent ${opts.parent} does not exist.`);
+      id = nextChild(opts.parent, ids);
+    } else {
+      id = nextTopLevel(ids);
+    }
+    const status = config.statuses[0] as string;
+    const statusDir = join(root, ISSUES_DIR, status);
+    mkdirSync(statusDir, { recursive: true });
+    const dir = join(statusDir, folderName(id, opts.slug));
+    try {
+      mkdirSync(dir);
+    } catch (err) {
+      if (errCode(err) === "EEXIST") throw new LoloError(`${relative(root, dir)} already exists.`);
+      throw err;
+    }
+    const file = join(dir, ISSUE_FILE);
+    writeFileSync(
+      file,
+      renderIssue({ id, kind, parent: opts.parent ?? null, status, assignee }),
+      { flag: "wx" },
+    );
+    return { id, path: relative(root, file) };
+  });
 }
 
 export function moveIssue(cwd: string, id: string, status: string): { from: string; to: string } {
@@ -118,22 +151,47 @@ export function moveIssue(cwd: string, id: string, status: string): { from: stri
     throw new LoloError(`Unknown status "${status}". Statuses: ${config.statuses.join(", ")}.`);
   }
   if (!isValidId(id)) throw new LoloError(`"${id}" is not a valid ID.`);
-  const matches = scan(root, config).issues.filter((i) => i.id === id);
-  if (matches.length === 0) throw new LoloError(`Issue ${id} not found.`);
-  if (matches.length > 1) {
-    throw new LoloError(`Issue ${id} exists in more than one place; run validate and fix the duplicate first.`);
-  }
-  const issue = matches[0]!;
-  if (issue.status === status) throw new LoloError(`Issue ${id} is already in ${status}.`);
-  const dest = join(root, ISSUES_DIR, status, issue.folder);
-  if (existsSync(dest)) throw new LoloError(`${relative(root, dest)} already exists.`);
-  const file = join(issue.dir, ISSUE_FILE);
-  if (!existsSync(file)) throw new LoloError(`${relative(root, file)} is missing.`);
-  // Rewrite status first so a bad ISSUE.md fails before anything moves.
-  const updated = setField(readFileSync(file, "utf8"), "status", status);
-  writeFileSync(file, updated);
-  renameSync(issue.dir, dest);
-  return { from: relative(root, issue.dir), to: relative(root, dest) };
+
+  return withLock(root, () => {
+    const matches = scan(root, config).issues.filter((i) => i.id === id);
+    if (matches.length === 0) throw new LoloError(`Issue ${id} not found.`);
+    if (matches.length > 1) {
+      throw new LoloError(`Issue ${id} exists in more than one place; run ${TOOL} validate and fix the duplicate first.`);
+    }
+    const issue = matches[0]!;
+    if (issue.status === status) throw new LoloError(`Issue ${id} is already in ${status}.`);
+    const statusDir = join(root, ISSUES_DIR, status);
+    const dest = join(statusDir, issue.folder);
+    if (existsSync(dest)) throw new LoloError(`${relative(root, dest)} already exists.`);
+
+    // Everything that can fail on content happens before anything moves.
+    const file = join(issue.dir, ISSUE_FILE);
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch (err) {
+      throw new LoloError(`Cannot read ${relative(root, file)} (${errCode(err)}).`);
+    }
+    const updated = setField(text, "status", status);
+
+    // Move first, then rewrite status. If the rewrite fails, move the folder back, so the
+    // folder and the status field are never left disagreeing.
+    mkdirSync(statusDir, { recursive: true });
+    renameSync(issue.dir, dest);
+    try {
+      writeFileSync(join(dest, ISSUE_FILE), updated);
+    } catch (err) {
+      try {
+        renameSync(dest, issue.dir);
+      } catch {
+        throw new LoloError(
+          `Moved ${relative(root, issue.dir)} to ${relative(root, dest)} but could not update its status field (${errCode(err)}), and could not move it back. Fix it by hand.`,
+        );
+      }
+      throw new LoloError(`Could not update ${ISSUE_FILE} (${errCode(err)}). Nothing was moved.`);
+    }
+    return { from: relative(root, issue.dir), to: relative(root, dest) };
+  });
 }
 
 export interface Problem {
@@ -143,61 +201,75 @@ export interface Problem {
 
 export function validate(cwd: string): Problem[] {
   const root = findRoot(cwd);
-  const config = loadConfig(root);
+  let config: Config;
+  try {
+    config = loadConfig(root);
+  } catch (err) {
+    if (err instanceof LoloError) {
+      return [{ path: `${ISSUES_DIR}/${CONFIG_FILE}`, message: err.message }];
+    }
+    throw err;
+  }
   const s = scan(root, config);
   const out: Problem[] = [];
   const rel = (p: string) => relative(root, p);
 
   for (const d of s.unknownDirs) {
-    out.push({ path: `${ISSUES_DIR}/${d}`, message: "Folder is not a status in lolo.json." });
+    out.push({ path: `${ISSUES_DIR}/${d}`, message: `Folder is not a status in ${CONFIG_FILE}.` });
   }
   for (const st of s.missingStatuses) {
     out.push({ path: `${ISSUES_DIR}/${st}`, message: "Status folder is missing." });
   }
+  for (const st of s.badStatusPaths) {
+    out.push({ path: `${ISSUES_DIR}/${st}`, message: "Status path is not a readable folder." });
+  }
 
-  // First pass: parse folders and files, collect IDs.
   interface Known {
     id: string;
     depth: number;
-    parent: string;
     path: string;
   }
   const byId = new Map<string, Known[]>();
-  const issueFields: { known: Known; fields: Record<string, string> }[] = [];
+  const withFields: { known: Known; fields: Record<string, string> }[] = [];
 
   for (const issue of s.issues) {
     const path = rel(issue.dir);
-    const parsed = parseFolderName(issue.folder);
-    if (!parsed) {
+    if (!issue.id) {
+      out.push({ path, message: "Folder name must start with a valid ID, then a hyphen, then a slug." });
+      continue;
+    }
+    // A bad slug is reported, but the issue still takes part in every other check.
+    if (!parseFolderName(issue.folder)) {
+      out.push({ path, message: "Folder name must be <id>-<slug> with a lowercase kebab-case slug." });
+    }
+    const known: Known = { id: issue.id, depth: depth(issue.id), path };
+    byId.set(issue.id, [...(byId.get(issue.id) ?? []), known]);
+
+    const file = join(issue.dir, ISSUE_FILE);
+    const here = rel(file);
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch (err) {
       out.push({
         path,
-        message: issue.id
-          ? "Folder name must be <id>-<slug> with a lowercase kebab-case slug."
-          : "Folder name must start with a valid ID, then a hyphen, then a slug.",
+        message: errCode(err) === "ENOENT" ? `${ISSUE_FILE} is missing.` : `${ISSUE_FILE} cannot be read (${errCode(err)}).`,
       });
       continue;
     }
-    // Register the ID before reading the file, so duplicates and parent lookups
-    // still see issues whose ISSUE.md is missing or broken.
-    const known: Known = { id: parsed.id, depth: depth(parsed.id), parent: "", path };
-    byId.set(parsed.id, [...(byId.get(parsed.id) ?? []), known]);
-    const file = join(issue.dir, ISSUE_FILE);
-    if (!existsSync(file)) {
-      out.push({ path, message: `${ISSUE_FILE} is missing.` });
-      continue;
-    }
-    const fm = parseFrontMatter(readFileSync(file, "utf8"));
+    const fm = parseFrontMatter(text);
     if (!fm) {
-      out.push({ path: rel(file), message: "Front matter is missing or malformed." });
+      out.push({ path: here, message: "Front matter is missing or malformed." });
       continue;
     }
     const f = fm.fields;
-    known.parent = f["parent"] ?? "";
-    issueFields.push({ known, fields: f });
+    withFields.push({ known, fields: f });
 
-    const here = rel(file);
-    if (f["id"] !== parsed.id) {
-      out.push({ path: here, message: `id "${f["id"] ?? ""}" does not match the folder ID ${parsed.id}.` });
+    for (const key of fm.duplicates) {
+      out.push({ path: here, message: `Field "${key}" appears more than once.` });
+    }
+    if (f["id"] !== issue.id) {
+      out.push({ path: here, message: `id "${f["id"] ?? ""}" does not match the folder ID ${issue.id}.` });
     }
     if (f["status"] !== issue.status) {
       out.push({
@@ -223,11 +295,13 @@ export function validate(cwd: string): Problem[] {
   }
 
   // Parent checks need the full ID set.
-  for (const { known, fields } of issueFields) {
+  for (const { known, fields } of withFields) {
     const here = `${known.path}/${ISSUE_FILE}`;
-    const parent = fields["parent"] ?? "";
+    const parent = fields["parent"];
     if (known.depth === 1) {
-      if (parent) out.push({ path: here, message: "A level-1 issue must not have a parent." });
+      if (parent !== undefined) {
+        out.push({ path: here, message: "A level-1 issue must omit the parent field." });
+      }
       continue;
     }
     if (!parent) {
