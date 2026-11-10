@@ -1,10 +1,10 @@
 {
-  "name": "lolo",
+  "name": "yardhand",
   "version": "0.1.0",
   "description": "File-based issue tracking for repos worked on by people and AI models.",
   "type": "module",
   "bin": {
-    "lolo": "dist/cli.js"
+    "yardhand": "dist/cli.js"
   },
   "files": [
     "dist"

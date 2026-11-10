@@ -1,12 +1,12 @@
-export class LoloError extends Error {
+export class YardhandError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "LoloError";
+    this.name = "YardhandError";
   }
 }
 
-/** No issues/lolo.json was found. Distinct from "found but unreadable", which must never be treated as "not set up". */
-export class NotInitializedError extends LoloError {
+/** No issues/yardhand.json was found. Distinct from "found but unreadable", which must never be treated as "not set up". */
+export class NotInitializedError extends YardhandError {
   constructor(message: string) {
     super(message);
     this.name = "NotInitializedError";

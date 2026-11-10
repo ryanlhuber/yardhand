@@ -1,7 +1,7 @@
 import { lstatSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { CONFIG_FILE, ISSUES_DIR, TOOL } from "./names.js";
-import { LoloError, NotInitializedError } from "./errors.js";
+import { YardhandError, NotInitializedError } from "./errors.js";
 import { STATUS_RE } from "./ids.js";
 
 export interface Config {
@@ -34,27 +34,27 @@ export function parseConfig(text: string): Config {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new LoloError(`${CONFIG_FILE} is not valid JSON.`);
+    throw new YardhandError(`${CONFIG_FILE} is not valid JSON.`);
   }
   const statuses = (data as { statuses?: unknown } | null)?.statuses;
   const problems = statusProblems(statuses);
-  if (problems.length) throw new LoloError(`${CONFIG_FILE}: ${problems.join(" ")}`);
+  if (problems.length) throw new YardhandError(`${CONFIG_FILE}: ${problems.join(" ")}`);
   return { statuses: statuses as string[] };
 }
 
-/** issues/ must be a real folder. Lolo never follows a symlink there. */
+/** issues/ must be a real folder. Yardhand never follows a symlink there. */
 export function assertIssuesDirIsReal(root: string): void {
   try {
     if (lstatSync(join(root, ISSUES_DIR)).isSymbolicLink()) {
-      throw new LoloError(`${ISSUES_DIR}/ is a symlink. ${TOOL} does not follow symlinks.`);
+      throw new YardhandError(`${ISSUES_DIR}/ is a symlink. ${TOOL} does not follow symlinks.`);
     }
   } catch (err) {
-    if (err instanceof LoloError) throw err;
+    if (err instanceof YardhandError) throw err;
     // Missing is fine here; other errors surface where the folder is used.
   }
 }
 
-/** Walk upward from `start` to find the repo root, the folder that holds issues/lolo.json. */
+/** Walk upward from `start` to find the repo root, the folder that holds issues/yardhand.json. */
 export function findRoot(start: string): string {
   let dir = resolve(start);
   for (;;) {
@@ -65,12 +65,12 @@ export function findRoot(start: string): string {
       assertIssuesDirIsReal(dir);
       return dir;
     } catch (err) {
-      if (err instanceof LoloError) throw err;
+      if (err instanceof YardhandError) throw err;
       const code = (err as NodeJS.ErrnoException).code;
       // Absent is the normal "keep looking". Anything else means issues/ is there but cannot be
       // read, and walking past it would hide the real problem.
       if (code !== "ENOENT" && code !== "ENOTDIR") {
-        throw new LoloError(`Cannot read ${ISSUES_DIR}/${CONFIG_FILE} in ${dir} (${code ?? "error"}).`);
+        throw new YardhandError(`Cannot read ${ISSUES_DIR}/${CONFIG_FILE} in ${dir} (${code ?? "error"}).`);
       }
     }
     const up = dirname(dir);

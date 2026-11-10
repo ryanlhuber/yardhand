@@ -8,7 +8,7 @@ import {
   ISSUE_FILE,
   TOOL,
 } from "./names.js";
-import { LoloError } from "./errors.js";
+import { YardhandError } from "./errors.js";
 import type { Config } from "./config.js";
 
 /** The generated "Work items" block. Built from the config and CLI version so it cannot drift. */
@@ -52,7 +52,7 @@ export function upsertBlock(text: string, block: string, name = "file"): string 
   const start = text.indexOf(BLOCK_START);
   const end = text.indexOf(BLOCK_END);
   if (starts !== 1 || ends !== 1 || end < start) {
-    throw new LoloError(
+    throw new YardhandError(
       `${name} has damaged ${TOOL} markers (${BLOCK_START} and ${BLOCK_END} must each appear once, start first). Fix or remove them, then run again. Nothing was changed.`,
     );
   }

@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
-import { LoloError, NotInitializedError } from "./errors.js";
+import { YardhandError, NotInitializedError } from "./errors.js";
 import { CONFIG_FILE, ISSUES_DIR, ISSUE_FILE, TOOL } from "./names.js";
 import {
   type Config,
@@ -66,7 +66,7 @@ export function init(
   force = false,
 ): InitResult {
   const problems = statusProblems(statuses);
-  if (problems.length) throw new LoloError(problems.join(" "));
+  if (problems.length) throw new YardhandError(problems.join(" "));
 
   // Like every other command, init works from the existing root when there is one. Only
   // "not set up yet" means start fresh; a root that is there but unreadable is an error.
@@ -78,7 +78,7 @@ export function init(
   }
   if (existing && !force) {
     const where = rel(resolve(cwd), existing);
-    throw new LoloError(
+    throw new YardhandError(
       `Already initialized${where ? ` at ${where}` : ""} (${ISSUES_DIR}/${CONFIG_FILE} exists). Use --force to overwrite the config.`,
     );
   }
@@ -139,18 +139,18 @@ export function newIssue(cwd: string, opts: NewOptions): { id: string; path: str
   const root = findRoot(cwd);
   const config = loadConfig(root);
   if (!SLUG_RE.test(opts.slug)) {
-    throw new LoloError(`Slug "${opts.slug}" must be lowercase kebab-case, for example add-auth.`);
+    throw new YardhandError(`Slug "${opts.slug}" must be lowercase kebab-case, for example add-auth.`);
   }
   const kind = opts.kind ?? "task";
-  if (kind !== "task" && kind !== "bug") throw new LoloError('--kind must be "task" or "bug".');
+  if (kind !== "task" && kind !== "bug") throw new YardhandError('--kind must be "task" or "bug".');
   // Checked on the raw value, before any trimming. Control characters (newlines included),
   // Unicode line and paragraph separators, and "#" could all change how the file parses.
   const assignee = opts.assignee ?? "";
   if (UNSAFE_ASSIGNEE.test(assignee)) {
-    throw new LoloError("--assignee must be a single line of text and must not contain # or control characters.");
+    throw new YardhandError("--assignee must be a single line of text and must not contain # or control characters.");
   }
   if (opts.parent !== undefined && !isValidId(opts.parent)) {
-    throw new LoloError(`"${opts.parent}" is not a valid ID.`);
+    throw new YardhandError(`"${opts.parent}" is not a valid ID.`);
   }
 
   // Scan, allocate, and create under one lock so concurrent runs cannot share an ID.
@@ -160,7 +160,7 @@ export function newIssue(cwd: string, opts: NewOptions): { id: string; path: str
     const ids = allIds(s);
     let id: string;
     if (opts.parent) {
-      if (!ids.includes(opts.parent)) throw new LoloError(`Parent ${opts.parent} does not exist.`);
+      if (!ids.includes(opts.parent)) throw new YardhandError(`Parent ${opts.parent} does not exist.`);
       id = nextChild(opts.parent, ids);
     } else {
       id = nextTopLevel(ids);
@@ -172,7 +172,7 @@ export function newIssue(cwd: string, opts: NewOptions): { id: string; path: str
     try {
       mkdirSync(dir);
     } catch (err) {
-      if (errCode(err) === "EEXIST") throw new LoloError(`${rel(root, dir)} already exists.`);
+      if (errCode(err) === "EEXIST") throw new YardhandError(`${rel(root, dir)} already exists.`);
       throw err;
     }
     const file = join(dir, ISSUE_FILE);
@@ -189,35 +189,35 @@ export function moveIssue(cwd: string, id: string, status: string): { from: stri
   const root = findRoot(cwd);
   const config = loadConfig(root);
   if (!config.statuses.includes(status)) {
-    throw new LoloError(`Unknown status "${status}". Statuses: ${config.statuses.join(", ")}.`);
+    throw new YardhandError(`Unknown status "${status}". Statuses: ${config.statuses.join(", ")}.`);
   }
-  if (!isValidId(id)) throw new LoloError(`"${id}" is not a valid ID.`);
+  if (!isValidId(id)) throw new YardhandError(`"${id}" is not a valid ID.`);
 
   return withLock(root, () => {
     const s = scan(root, config);
     assertComplete(s);
     const matches = s.issues.filter((i) => i.id === id);
-    if (matches.length === 0) throw new LoloError(`Issue ${id} not found.`);
+    if (matches.length === 0) throw new YardhandError(`Issue ${id} not found.`);
     if (matches.length > 1) {
-      throw new LoloError(`Issue ${id} exists in more than one place; run ${TOOL} validate and fix the duplicate first.`);
+      throw new YardhandError(`Issue ${id} exists in more than one place; run ${TOOL} validate and fix the duplicate first.`);
     }
     const issue = matches[0]!;
-    if (issue.status === status) throw new LoloError(`Issue ${id} is already in ${status}.`);
+    if (issue.status === status) throw new YardhandError(`Issue ${id} is already in ${status}.`);
     const statusDir = join(root, ISSUES_DIR, status);
     const dest = join(statusDir, issue.folder);
-    if (existsSync(dest)) throw new LoloError(`${rel(root, dest)} already exists.`);
+    if (existsSync(dest)) throw new YardhandError(`${rel(root, dest)} already exists.`);
 
     // Everything that can fail on content happens before anything moves.
     const file = join(issue.dir, ISSUE_FILE);
     let text: string;
     try {
       if (lstatSync(file).isSymbolicLink()) {
-        throw new LoloError(`${rel(root, file)} is a symlink. ${TOOL} does not follow symlinks.`);
+        throw new YardhandError(`${rel(root, file)} is a symlink. ${TOOL} does not follow symlinks.`);
       }
       text = readFileSync(file, "utf8");
     } catch (err) {
-      if (err instanceof LoloError) throw err;
-      throw new LoloError(`Cannot read ${rel(root, file)} (${errCode(err)}).`);
+      if (err instanceof YardhandError) throw err;
+      throw new YardhandError(`Cannot read ${rel(root, file)} (${errCode(err)}).`);
     }
     const updated = setField(text, "status", status);
 
@@ -233,14 +233,14 @@ export function moveIssue(cwd: string, id: string, status: string): { from: stri
       writeFileSync(tmp, updated, { flag: "wx" });
     } catch (err) {
       tryRemove(tmp);
-      throw new LoloError(`Could not write the new status (${errCode(err)}). Nothing was moved.`);
+      throw new YardhandError(`Could not write the new status (${errCode(err)}). Nothing was moved.`);
     }
     try {
       mkdirSync(statusDir, { recursive: true });
       renameSync(issue.dir, dest);
     } catch (err) {
       tryRemove(tmp);
-      throw new LoloError(`Could not move ${rel(root, issue.dir)} (${errCode(err)}). Nothing was moved.`);
+      throw new YardhandError(`Could not move ${rel(root, issue.dir)} (${errCode(err)}). Nothing was moved.`);
     }
     try {
       renameSync(join(dest, name), join(dest, ISSUE_FILE));
@@ -248,12 +248,12 @@ export function moveIssue(cwd: string, id: string, status: string): { from: stri
       try {
         renameSync(dest, issue.dir);
       } catch {
-        throw new LoloError(
+        throw new YardhandError(
           `${rel(root, dest)} was moved to ${status} but its status field still says ${issue.status}, and it could not be moved back (${errCode(err)}). Move it back by hand, or fix the field.`,
         );
       }
       tryRemove(join(issue.dir, name));
-      throw new LoloError(`Could not update ${ISSUE_FILE} (${errCode(err)}). Nothing was moved.`);
+      throw new YardhandError(`Could not update ${ISSUE_FILE} (${errCode(err)}). Nothing was moved.`);
     }
     return { from: rel(root, issue.dir), to: rel(root, dest) };
   });
@@ -274,7 +274,7 @@ export function validate(cwd: string): Problem[] {
     out.push({
       path: ISSUES_DIR,
       message:
-        err instanceof LoloError
+        err instanceof YardhandError
           ? err.message
           : `Could not finish checking (${errCode(err)}${err instanceof Error ? `: ${err.message}` : ""}).`,
     });
@@ -289,7 +289,7 @@ function collect(root: string, out: Problem[]): void {
   } catch (err) {
     out.push({
       path: `${ISSUES_DIR}/${CONFIG_FILE}`,
-      message: err instanceof LoloError ? err.message : `${CONFIG_FILE} cannot be read (${errCode(err)}).`,
+      message: err instanceof YardhandError ? err.message : `${CONFIG_FILE} cannot be read (${errCode(err)}).`,
     });
     return;
   }

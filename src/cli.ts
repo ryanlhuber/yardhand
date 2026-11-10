@@ -3,7 +3,7 @@ import * as p from "@clack/prompts";
 import pkg from "../package.json";
 import { DEFAULT_STATUSES } from "./config.js";
 import { DEPOT_INSTALL, ISSUES_DIR, TOOL } from "./names.js";
-import { LoloError } from "./errors.js";
+import { YardhandError } from "./errors.js";
 import { init, moveIssue, newIssue, validate } from "./commands.js";
 import { STATUS_RE } from "./ids.js";
 
@@ -77,7 +77,7 @@ async function main(argv: string[]): Promise<number> {
   const isHelp = !command || command === "--help" || command === "-h" || command === "help";
   const isVersion = command === "--version" || command === "-v";
   if ((isHelp || isVersion) && rest.length > 0) {
-    throw new LoloError(`Unexpected argument "${rest[0]}". Run "${TOOL} --help".`);
+    throw new YardhandError(`Unexpected argument "${rest[0]}". Run "${TOOL} --help".`);
   }
   if (isHelp) {
     process.stdout.write(HELP);
@@ -103,7 +103,7 @@ async function main(argv: string[]): Promise<number> {
       if (values.statuses !== undefined) statuses = splitList(values.statuses);
       else if (values.yes) statuses = DEFAULT_STATUSES;
       else if (process.stdin.isTTY) statuses = await promptStatuses();
-      else throw new LoloError(`Not a terminal. Use "${TOOL} init --yes" (optionally with --statuses a,b,c).`);
+      else throw new YardhandError(`Not a terminal. Use "${TOOL} init --yes" (optionally with --statuses a,b,c).`);
       const result = init(cwd, statuses, pkg.version, values.force ?? false);
       const lines = [
         `Created ${ISSUES_DIR}/ with statuses: ${result.statuses.join(", ")}`,
@@ -127,7 +127,7 @@ async function main(argv: string[]): Promise<number> {
         },
       });
       const slug = positionals[0];
-      if (!slug || positionals.length > 1) throw new LoloError(`Usage: ${TOOL} new <slug> [--parent <id>] [--kind task|bug]`);
+      if (!slug || positionals.length > 1) throw new YardhandError(`Usage: ${TOOL} new <slug> [--parent <id>] [--kind task|bug]`);
       const r = newIssue(cwd, {
         slug,
         parent: values.parent,
@@ -140,7 +140,7 @@ async function main(argv: string[]): Promise<number> {
     case "move": {
       const { positionals } = parseArgs({ args: rest, allowPositionals: true, options: {} });
       const [id, status] = positionals;
-      if (!id || !status || positionals.length > 2) throw new LoloError(`Usage: ${TOOL} move <id> <status>`);
+      if (!id || !status || positionals.length > 2) throw new YardhandError(`Usage: ${TOOL} move <id> <status>`);
       const r = moveIssue(cwd, id, status);
       process.stdout.write(`${r.from} -> ${r.to}\n`);
       return 0;
@@ -160,7 +160,7 @@ async function main(argv: string[]): Promise<number> {
       return 1;
     }
     default:
-      throw new LoloError(`Unknown command "${command}". Run "${TOOL} --help".`);
+      throw new YardhandError(`Unknown command "${command}". Run "${TOOL} --help".`);
   }
 }
 

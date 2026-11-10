@@ -24,7 +24,7 @@ const LS = String.fromCharCode(0x2028);
 const PS = String.fromCharCode(0x2029);
 
 function repo(statuses = STATUSES): string {
-  const root = mkdtempSync(join(tmpdir(), "lolo-h-"));
+  const root = mkdtempSync(join(tmpdir(), "yardhand-h-"));
   init(root, statuses, "0.0.0");
   return root;
 }
@@ -38,7 +38,7 @@ const cli = (root: string, args: string[], env: Record<string, string> = {}) =>
     env: { ...process.env, ...env },
     timeout: 15_000,
   });
-const LOCK = "issues/.lolo-lock";
+const LOCK = "issues/.yardhand-lock";
 
 /** Symlinks need privileges on Windows. Returns false when they cannot be created. */
 function trySymlink(target: string, path: string): boolean {
@@ -60,7 +60,7 @@ test("lock: a live holder is never evicted, however long it holds", () => {
   write(root, `${LOCK}/owner`, `${process.pid} livetoken\n`);
   const old = new Date(Date.now() - 10 * 60_000);
   utimesSync(join(root, LOCK), old, old); // ten minutes old, but its owner is still running
-  const r = cli(root, ["new", "x-one"], { LOLO_LOCK_TIMEOUT_MS: "400" });
+  const r = cli(root, ["new", "x-one"], { YARDHAND_LOCK_TIMEOUT_MS: "400" });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /Could not get the lock/);
   assert.match(read(root, `${LOCK}/owner`), /livetoken/, "the live holder's lock is untouched");
@@ -74,13 +74,13 @@ test("lock: a lock whose owner process has exited is reclaimed", () => {
   const r = cli(root, ["new", "x-one"]);
   assert.equal(r.status, 0, r.stderr);
   assert.ok(!existsSync(join(root, LOCK)), "lock released");
-  assert.ok(!existsSync(join(root, "issues/.lolo-lock.abandoned-oldtoken")));
+  assert.ok(!existsSync(join(root, "issues/.yardhand-lock.abandoned-oldtoken")));
 });
 
 test("lock: with no owner file, a fresh lock is respected and an old one is reclaimed", () => {
   const root = repo();
   mkdirSync(join(root, LOCK));
-  const fresh = cli(root, ["new", "x-one"], { LOLO_LOCK_TIMEOUT_MS: "400" });
+  const fresh = cli(root, ["new", "x-one"], { YARDHAND_LOCK_TIMEOUT_MS: "400" });
   assert.equal(fresh.status, 1);
   const old = new Date(Date.now() - 60_000);
   utimesSync(join(root, LOCK), old, old);
@@ -91,7 +91,7 @@ test("lock: with no owner file, a fresh lock is respected and an old one is recl
 test("lock: a dangling symlink at the lock path ends in a clear error, not a spin", (t) => {
   const root = repo();
   if (!trySymlink(join(root, "does-not-exist"), join(root, LOCK))) return t.skip("symlinks need privileges");
-  const r = cli(root, ["new", "x-one"], { LOLO_LOCK_TIMEOUT_MS: "400" });
+  const r = cli(root, ["new", "x-one"], { YARDHAND_LOCK_TIMEOUT_MS: "400" });
   assert.equal(r.signal, null, "the command ended by itself");
   assert.equal(r.status, 1);
   assert.match(r.stderr, /Could not get the lock/);
@@ -148,9 +148,9 @@ test("init --force refuses a status list that would hide existing issues", () =>
   const root = repo();
   newIssue(root, { slug: "add-auth" });
   moveIssue(root, "001", "in-progress");
-  const before = read(root, "issues/lolo.json");
+  const before = read(root, "issues/yardhand.json");
   assert.throws(() => init(root, ["backlog", "done"], "0.0.0", true), /in-progress/);
-  assert.equal(read(root, "issues/lolo.json"), before, "config unchanged");
+  assert.equal(read(root, "issues/yardhand.json"), before, "config unchanged");
   init(root, ["backlog", "in-progress", "review", "done"], "0.0.0", true);
   assert.equal(newIssue(root, { slug: "next" }).id, "002");
 });
@@ -158,7 +158,7 @@ test("init --force refuses a status list that would hide existing issues", () =>
 test("symlinks are reported and never followed", (t) => {
   const root = repo();
   newIssue(root, { slug: "add-auth" });
-  const outside = mkdtempSync(join(tmpdir(), "lolo-outside-"));
+  const outside = mkdtempSync(join(tmpdir(), "yardhand-outside-"));
   write(root, "outside.md", "---\nid: 001\nstatus: backlog\n---\n");
   rmSync(join(root, "issues/backlog/001-add-auth/ISSUE.md"));
   if (!trySymlink(join(root, "outside.md"), join(root, "issues/backlog/001-add-auth/ISSUE.md"))) {
@@ -178,10 +178,10 @@ test("symlinks are reported and never followed", (t) => {
 
 test("validate: a config that is a folder is reported, not thrown", () => {
   const root = repo();
-  rmSync(join(root, "issues/lolo.json"));
-  mkdirSync(join(root, "issues/lolo.json"));
+  rmSync(join(root, "issues/yardhand.json"));
+  mkdirSync(join(root, "issues/yardhand.json"));
   // findRoot looks for the file's existence, which a folder satisfies.
-  assert.match(messages(root), /lolo\.json: lolo\.json cannot be read \(EISDIR\)/);
+  assert.match(messages(root), /yardhand\.json: yardhand\.json cannot be read \(EISDIR\)/);
 });
 
 test("validate: a folder with no recognizable ID still gets every other check", () => {
@@ -229,7 +229,7 @@ test("CLI: stray arguments and an empty --statuses fail instead of being ignored
   assert.equal(cli(root, ["validate", "--typo"]).status, 1);
   assert.equal(cli(root, ["validate", "unexpected"]).status, 1);
   assert.equal(cli(root, ["validate"]).status, 0);
-  const fresh = mkdtempSync(join(tmpdir(), "lolo-h-"));
+  const fresh = mkdtempSync(join(tmpdir(), "yardhand-h-"));
   const r = cli(fresh, ["init", "--yes", "--statuses="]);
   assert.equal(r.status, 1);
   assert.ok(!existsSync(join(fresh, "issues")));
@@ -256,7 +256,7 @@ test("CLI: validate delivers every finding and the summary to a slow reader", as
 // ---- byte preservation: finding 13
 
 test("init keeps bytes outside the block exactly, even invalid UTF-8, and is idempotent", () => {
-  const root = mkdtempSync(join(tmpdir(), "lolo-h-"));
+  const root = mkdtempSync(join(tmpdir(), "yardhand-h-"));
   const original = Buffer.from([0x23, 0x20, 0xff, 0x0a, 0xc3, 0x28, 0x0a]);
   writeFileSync(join(root, "AGENTS.md"), original);
   init(root, STATUSES, "0.0.0");

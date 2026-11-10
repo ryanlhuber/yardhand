@@ -1,4 +1,4 @@
-import { LoloError } from "./errors.js";
+import { YardhandError } from "./errors.js";
 
 const CHILD = "(?:0[1-9]|[1-9]\\d)";
 export const ID_RE = new RegExp(`^\\d{3}(?:\\.${CHILD}){0,2}$`);
@@ -53,14 +53,14 @@ export function nextTopLevel(existing: Iterable<string>): string {
   for (const id of existing) {
     if (depth(id) === 1) max = Math.max(max, Number(id));
   }
-  if (max >= 999) throw new LoloError("No level-1 IDs left (999 is the maximum).");
+  if (max >= 999) throw new YardhandError("No level-1 IDs left (999 is the maximum).");
   return pad(max + 1, 3);
 }
 
 /** Next child of `parent`: highest existing child number under that ID prefix plus one. */
 export function nextChild(parent: string, existing: Iterable<string>): string {
   if (depth(parent) >= 3) {
-    throw new LoloError(`${parent} is already at the third level and cannot have children.`);
+    throw new YardhandError(`${parent} is already at the third level and cannot have children.`);
   }
   const want = depth(parent) + 1;
   const prefix = `${parent}.`;
@@ -70,6 +70,6 @@ export function nextChild(parent: string, existing: Iterable<string>): string {
       max = Math.max(max, Number(id.slice(prefix.length)));
     }
   }
-  if (max >= 99) throw new LoloError(`No child IDs left under ${parent} (99 is the maximum).`);
+  if (max >= 99) throw new YardhandError(`No child IDs left under ${parent} (99 is the maximum).`);
   return `${parent}.${pad(max + 1, 2)}`;
 }

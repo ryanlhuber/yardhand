@@ -1,4 +1,4 @@
-import { LoloError } from "./errors.js";
+import { YardhandError } from "./errors.js";
 
 export interface FrontMatter {
   fields: Record<string, string>;
@@ -35,9 +35,9 @@ export function parseFrontMatter(text: string): FrontMatter | null {
 /** Replace one field's value in place, keeping every other line (and any comment) as written. */
 export function setField(text: string, key: string, value: string): string {
   const fm = parseFrontMatter(text);
-  if (!fm) throw new LoloError("The issue file has no valid front matter.");
+  if (!fm) throw new YardhandError("The issue file has no valid front matter.");
   if (fm.duplicates.includes(key)) {
-    throw new LoloError(`Field "${key}" appears more than once in the front matter. Remove the extra line first.`);
+    throw new YardhandError(`Field "${key}" appears more than once in the front matter. Remove the extra line first.`);
   }
   const lines = text.split("\n");
   for (let i = 1; i < fm.end; i++) {
@@ -50,5 +50,5 @@ export function setField(text: string, key: string, value: string): string {
       return lines.join("\n");
     }
   }
-  throw new LoloError(`Field "${key}" not found in the front matter.`);
+  throw new YardhandError(`Field "${key}" not found in the front matter.`);
 }

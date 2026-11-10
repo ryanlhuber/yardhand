@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { ISSUES_DIR, TOOL } from "./names.js";
-import { LoloError } from "./errors.js";
+import { YardhandError } from "./errors.js";
 
 const LOCK_DIR = `.${TOOL}-lock`;
 const OWNER_FILE = "owner";
@@ -121,7 +121,7 @@ export function withLock<T>(root: string, fn: () => T): T {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       if (Date.now() - started > timeoutMs()) {
-        throw new LoloError(
+        throw new YardhandError(
           `Could not get the lock at ${ISSUES_DIR}/${LOCK_DIR}; another ${TOOL} command is still running. If none is, delete that folder.`,
         );
       }

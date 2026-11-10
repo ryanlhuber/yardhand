@@ -22,11 +22,11 @@ import { reclaim } from "../src/lock.js";
 
 const STATUSES = ["backlog", "in-progress", "done"];
 const bin = resolve("dist/cli.js");
-const LOCK = "issues/.lolo-lock";
+const LOCK = "issues/.yardhand-lock";
 const C1 = String.fromCharCode(0x85);
 
 function repo(): string {
-  const root = mkdtempSync(join(tmpdir(), "lolo-f-"));
+  const root = mkdtempSync(join(tmpdir(), "yardhand-f-"));
   init(root, STATUSES, "0.0.0");
   return root;
 }
@@ -128,11 +128,11 @@ test("init --force waits for the lock and changes nothing without it", () => {
   const root = repo();
   mkdirSync(join(root, LOCK));
   write(root, `${LOCK}/owner`, `${process.pid} holder\n`);
-  const before = read(root, "issues/lolo.json");
-  const r = cli(root, ["init", "--force", "--yes", "--statuses", "backlog,review,done"], { LOLO_LOCK_TIMEOUT_MS: "400" });
+  const before = read(root, "issues/yardhand.json");
+  const r = cli(root, ["init", "--force", "--yes", "--statuses", "backlog,review,done"], { YARDHAND_LOCK_TIMEOUT_MS: "400" });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /Could not get the lock/);
-  assert.equal(read(root, "issues/lolo.json"), before);
+  assert.equal(read(root, "issues/yardhand.json"), before);
 });
 
 // ---- C6: symlinks
@@ -254,6 +254,6 @@ test("permissions: an unreadable issues/ is reported by validate, not thrown", (
   chmodSync(join(root, "issues"), 0o000);
   const r = asNobody(root, ["validate"]);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /Cannot read issues\/lolo\.json/);
+  assert.match(r.stderr, /Cannot read issues\/yardhand\.json/);
   assert.doesNotMatch(r.stderr, /at .*\.js:\d+/, "no stack trace");
 });

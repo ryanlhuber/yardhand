@@ -20,7 +20,7 @@ const STATUSES = ["backlog", "in-progress", "done"];
 const bin = resolve("dist/cli.js");
 
 function repo(statuses = STATUSES): string {
-  const root = mkdtempSync(join(tmpdir(), "lolo-r-"));
+  const root = mkdtempSync(join(tmpdir(), "yardhand-r-"));
   init(root, statuses, "0.0.0");
   return root;
 }
@@ -72,8 +72,8 @@ test("move: destination collision, unreadable ISSUE.md, and bad front matter cha
 
 // ---- finding 2 and 10: damaged markers and bytes outside the block
 
-const START = "<!-- lolo:start -->";
-const END = "<!-- lolo:end -->";
+const START = "<!-- yardhand:start -->";
+const END = "<!-- yardhand:end -->";
 const BLOCK = `${START}\nnew\n${END}`;
 
 test("block: damaged markers throw instead of deleting text", () => {
@@ -96,7 +96,7 @@ test("block: text outside the markers is preserved exactly, and updates are idem
 });
 
 test("init: damaged markers in AGENTS.md fail before anything is written", () => {
-  const root = mkdtempSync(join(tmpdir(), "lolo-r-"));
+  const root = mkdtempSync(join(tmpdir(), "yardhand-r-"));
   const damaged = `mine\n${START}\nhalf a block\n`;
   writeFileSync(join(root, "AGENTS.md"), damaged);
   assert.throws(() => init(root, STATUSES, "0.0.0"), /damaged/);
@@ -119,7 +119,7 @@ test("new: 16 simultaneous runs get 16 different IDs", async () => {
   const ids = await Promise.all(Array.from({ length: 16 }, (_, i) => run(i)));
   assert.equal(new Set(ids).size, 16, ids.join(","));
   assert.deepEqual(validate(root), []);
-  assert.ok(!existsSync(join(root, "issues/.lolo-lock")), "lock is released");
+  assert.ok(!existsSync(join(root, "issues/.yardhand-lock")), "lock is released");
 });
 
 // ---- finding 4: duplicate fields
@@ -193,7 +193,7 @@ test("init: from a subfolder it uses the existing root and never creates a secon
   assert.ok(!existsSync(join(sub, "AGENTS.md")));
   init(sub, ["backlog", "review", "done"], "0.0.0", true);
   assert.ok(!existsSync(join(sub, "issues")));
-  assert.deepEqual(JSON.parse(read(root, "issues/lolo.json")).statuses, ["backlog", "review", "done"]);
+  assert.deepEqual(JSON.parse(read(root, "issues/yardhand.json")).statuses, ["backlog", "review", "done"]);
 });
 
 // ---- finding 9: semver
@@ -250,11 +250,11 @@ test("validate: missing or empty id, kind, and status are reported", () => {
 
 test("validate: an invalid config is a reported problem, and the CLI exits 1", () => {
   const root = repo();
-  write(root, "issues/lolo.json", '{ "statuses": ["done", "backlog"] }');
+  write(root, "issues/yardhand.json", '{ "statuses": ["done", "backlog"] }');
   const problems = validate(root);
   assert.equal(problems.length, 1);
   assert.match(problems[0]!.message, /first status/);
-  write(root, "issues/lolo.json", "not json");
+  write(root, "issues/yardhand.json", "not json");
   assert.match(messages(root), /not valid JSON/);
   const r = spawnSync("node", [bin, "validate"], { cwd: root, encoding: "utf8" });
   assert.equal(r.status, 1);
