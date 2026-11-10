@@ -70,7 +70,7 @@ released-in:
 - `kind`: required, `task` or `bug`.
 - `parent`: required for levels 2 and 3 and must be the ID with its last segment removed. Omitted for level 1. See "Moving work to a different parent" for the one exception.
 - `status`: required. Must equal the name of the status folder the issue is in.
-- `assignee`: optional single-line text. `lolo new` rejects an assignee that contains a newline or `#`.
+- `assignee`: optional single-line text. `lolo new` rejects an assignee that contains a control character (a newline or tab included), a Unicode line or paragraph separator (U+2028, U+2029), or `#`. The check is on the value as given, before any trimming; surrounding spaces are then trimmed.
 - `released-in`: optional semver (the grammar at semver.org: no leading zeros, no empty identifiers), set when shipped.
 - Front matter is a simple `key: value` block between `---` lines. A comment starts with `#` at the start of a value or after whitespace; a `#` inside a word is part of the value. No nesting. A key may appear only once. Both LF and CRLF line endings are accepted.
 
@@ -82,9 +82,11 @@ The folder name and ID never change. Update `parent:` to the new parent. `parent
 
 All commands, `init` included, run from the repo root or any folder below it. Lolo finds `issues/lolo.json` by walking upward. `init` in an already-initialized repo fails (even from a subfolder), and with `--force` it works on the existing root.
 
-`new` and `move` take an exclusive lock (`issues/.lolo-lock`, a folder created atomically) so concurrent runs cannot allocate the same ID. A lock older than 60 seconds is treated as stale. Folders under `issues/` that start with `.` are tool internals and are ignored.
+`new` and `move` take an exclusive lock (`issues/.lolo-lock`, a folder created atomically that holds the owner's process ID and a random token), so concurrent runs cannot allocate the same ID. A lock is abandoned only when the process that took it is no longer running, or, if it never wrote an owner, after 2 seconds. A slow but live holder is never evicted, however long it holds. A reclaim renames the old lock aside and checks it is the same lock it saw, putting it back if not. A lock is released only by its owner, and a failure to remove it never hides the result of the work. A command waits up to 10 seconds for the lock (override with `LOLO_LOCK_TIMEOUT_MS`), then fails with a message. Folders under `issues/` that start with `.` are tool internals and are ignored.
 
-`move` renames the folder first, then rewrites `status:`. If the rewrite fails, it renames the folder back. A failure never leaves the folder and the field disagreeing. If the status folder is missing, `move` creates it.
+`new` and `move` first need a complete view of every existing ID, so they refuse to run when: a status path is a file or cannot be read; a folder under `issues/` that is not a status holds issue folders; or there are symlinks under `issues/`. Lolo never follows symlinks.
+
+`move` writes the new `status:` to a temp file (`.ISSUE.md.tmp`) in the issue folder first, so a failed or partial write can only damage the temp file. It then renames the folder and renames the temp file over `ISSUE.md` (an atomic replace). If that last step fails, it renames the folder back, so the folder and the field never disagree. The one case it cannot repair is a failure of the move-back itself; it then says exactly what state the issue is in. If the status folder is missing, `move` creates it.
 
 ### `lolo init`
 
@@ -92,7 +94,7 @@ Interactive by default. Asks which statuses to use, with `backlog`, `in-progress
 
 Non-interactive: `lolo init --yes [--statuses a,b,c]`. Defaults to `backlog,in-progress,done`.
 
-Creates `issues/`, `issues/lolo.json`, and one folder per status (with a `.gitkeep` in each empty one). Creates the catch-all `000-maintain-repo` issue in the first status, so `000.NN` children (maintenance, bugs with no clear home) have a parent. Adds or updates the Lolo block in `AGENTS.md`, and in `CLAUDE.md` if that file exists. Prints the Depot install command as a suggestion. Never runs it. Refuses to overwrite an existing `lolo.json` unless `--force`.
+Creates `issues/`, `issues/lolo.json`, and one folder per status (with a `.gitkeep` in each empty one). Creates the catch-all `000-maintain-repo` issue in the first status, so `000.NN` children (maintenance, bugs with no clear home) have a parent. Adds or updates the Lolo block in `AGENTS.md`, and in `CLAUDE.md` if that file exists. Prints the Depot install command as a suggestion. Never runs it. Refuses to overwrite an existing `lolo.json` unless `--force`. With `--force` it also refuses a status list that omits a folder which holds issues (their IDs would become invisible and be handed out again). It validates `--statuses` even when it is empty.
 
 ### `lolo new <slug> [--parent <id>] [--kind task|bug] [--assignee <name>]`
 
@@ -104,7 +106,7 @@ Moves the issue folder to the status folder and rewrites `status:` in `ISSUE.md`
 
 ### `lolo validate`
 
-Checks and reports every problem with its path, and keeps going after a problem; filesystem surprises (a file where a folder should be, an `ISSUE.md` that is a folder) are reported as problems, never thrown. A folder with a bad slug still takes part in every other check. Exit code 1 if there is any error, 0 otherwise.
+Checks and reports every problem with its path, and keeps going after a problem; filesystem surprises (a file where a folder should be, an `ISSUE.md` that is a folder) are reported as problems, never thrown. A folder with a bad slug, or with no recognizable ID at all, still gets every check that does not need its ID. Symlinks are reported. Exit code 1 if there is any error, 0 otherwise.
 
 1. `lolo.json` is valid (rules above). An invalid config is reported as a problem.
 2. Every status has a folder. Every folder under `issues/` is a status or reported as unknown.
@@ -133,7 +135,7 @@ Written between markers so `init` can update it:
 <!-- lolo:end -->
 ```
 
-Content outside the markers is kept byte for byte, including when the block is appended. If the markers are damaged (one missing, reversed, or repeated), `init` fails and changes nothing, and it checks this before writing anything else. The block is generated from `lolo.json` and the CLI version. It states: where issues live; the status words in order; the ID rules; never invent IDs; use `lolo new` and `lolo move`; run `lolo validate` before finishing; and the vocabulary mapping for Depot (level 1 is what Depot's skills call an epic, level 3 is a work item). Content outside the markers is never touched.
+Content outside the markers is kept byte for byte, including when the block is appended and including bytes that are not valid UTF-8. Markers are found by plain text search anywhere in the file, so do not put the literal marker lines in your own text (for example in a fenced example); a pair there would be treated as the block. If the markers are damaged (one missing, reversed, or repeated), `init` fails and changes nothing, and it checks this before writing anything else. The block is generated from `lolo.json` and the CLI version. It states: where issues live; the status words in order; the ID rules; never invent IDs; use `lolo new` and `lolo move`; run `lolo validate` before finishing; and the vocabulary mapping for Depot (level 1 is what Depot's skills call an epic, level 3 is a work item). Content outside the markers is never touched.
 
 ## Name constants
 
@@ -142,3 +144,9 @@ The tool name, config filename, issues folder name, issue filename, and block ma
 ## Out of v1
 
 `roadmap`, `status add|rename|remove`, the frontend, a dev-dependency prompt, a harness picker, `releases/<version>.md` generation.
+
+## CLI behavior
+
+- Unknown options and extra arguments are errors for every command, including `validate`.
+- Errors go to stderr, results to stdout, exit code 1 on failure. Output is written before the process ends, so a slow reader still receives every line.
+- Paths in output always use forward slashes.

@@ -19,7 +19,10 @@ Usage:
 
 const OPTIONAL_STATUSES = ["review", "merge-ready", "blocked"];
 
+let interactive = false;
+
 async function promptStatuses(): Promise<string[]> {
+  interactive = true;
   p.intro(`${TOOL} init`);
   const chosen = await p.multiselect({
     message: "Which statuses do you want? (backlog and done are always included)",
@@ -92,7 +95,7 @@ async function main(argv: string[]): Promise<number> {
         },
       });
       let statuses: string[];
-      if (values.statuses) statuses = splitList(values.statuses);
+      if (values.statuses !== undefined) statuses = splitList(values.statuses);
       else if (values.yes) statuses = DEFAULT_STATUSES;
       else if (process.stdin.isTTY) statuses = await promptStatuses();
       else throw new LoloError(`Not a terminal. Use "${TOOL} init --yes" (optionally with --statuses a,b,c).`);
@@ -138,13 +141,17 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "validate": {
+      // No options and no positionals: anything extra is a mistake, not something to ignore.
+      parseArgs({ args: rest, allowPositionals: false, options: {} });
       const problems = validate(cwd);
       if (problems.length === 0) {
         process.stdout.write("OK\n");
         return 0;
       }
-      for (const pr of problems) process.stderr.write(`${pr.path}: ${pr.message}\n`);
-      process.stderr.write(`\n${problems.length} problem${problems.length === 1 ? "" : "s"} found.\n`);
+      // One write, then let the process end on its own, so a slow reader still gets every line.
+      const lines = problems.map((pr) => `${pr.path}: ${pr.message}`);
+      lines.push("", `${problems.length} problem${problems.length === 1 ? "" : "s"} found.`);
+      process.stderr.write(lines.join("\n") + "\n");
       return 1;
     }
     default:
@@ -152,10 +159,16 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-main(process.argv.slice(2)).then(
-  (code) => process.exit(code),
-  (err) => {
-    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
-    process.exit(1);
-  },
-);
+// Set the exit code and let Node flush stdout/stderr before exiting. Calling process.exit() right
+// after a write can cut off output on a pipe. The interactive prompts leave stdin open, so that
+// path exits explicitly (its output goes to a terminal, which is written synchronously).
+const finish = (code: number) => {
+  process.exitCode = code;
+  if (interactive) process.exit(code);
+};
+
+main(process.argv.slice(2)).then(finish, (err) => {
+  const message = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`${message.replace(/^(TypeError|Error) \[[A-Z_]+\]: /, "")}\n`);
+  finish(1);
+});

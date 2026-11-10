@@ -65,8 +65,15 @@ export interface BlockWrite {
   content: string;
 }
 
-/** Work out the AGENTS.md (created if missing) and CLAUDE.md (only if it exists) updates without writing. */
+/**
+ * Work out the AGENTS.md (created if missing) and CLAUDE.md (only if it exists) updates without writing.
+ *
+ * Files are handled as latin1, which maps every byte to one character and back, so bytes outside the
+ * block (even invalid UTF-8) come back exactly as they were. The block's own UTF-8 bytes are carried
+ * through the same way. The markers are ASCII, so searching still works.
+ */
 export function planBlocks(root: string, block: string): BlockWrite[] {
+  const asBytes = Buffer.from(block, "utf8").toString("latin1");
   const plan: BlockWrite[] = [];
   for (const [name, create] of [
     ["AGENTS.md", true],
@@ -75,13 +82,13 @@ export function planBlocks(root: string, block: string): BlockWrite[] {
     const path = join(root, name);
     const exists = existsSync(path);
     if (!exists && !create) continue;
-    const current = exists ? readFileSync(path, "utf8") : "";
-    plan.push({ name, path, content: upsertBlock(current, block, name) });
+    const current = exists ? readFileSync(path).toString("latin1") : "";
+    plan.push({ name, path, content: upsertBlock(current, asBytes, name) });
   }
   return plan;
 }
 
 export function applyBlocks(plan: BlockWrite[]): string[] {
-  for (const w of plan) writeFileSync(w.path, w.content);
+  for (const w of plan) writeFileSync(w.path, w.content, "latin1");
   return plan.map((w) => w.name);
 }

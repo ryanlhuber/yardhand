@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -317,5 +318,5 @@ test("CLI: validate exits 1 and names the file when an issue is invalid", () => 
 });
 
 function rmDir(root: string, p: string): void {
-  spawnSync("rm", ["-rf", join(root, p)]);
+  rmSync(join(root, p), { recursive: true, force: true });
 }

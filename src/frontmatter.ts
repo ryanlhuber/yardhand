@@ -14,12 +14,14 @@ export function parseFrontMatter(text: string): FrontMatter | null {
   if (lines[0] !== "---") return null;
   const end = lines.indexOf("---", 1);
   if (end === -1) return null;
-  const fields: Record<string, string> = {};
+  // No prototype, so keys like "constructor" or "toString" are ordinary keys.
+  const fields: Record<string, string> = Object.create(null);
   const duplicates: string[] = [];
   for (let i = 1; i < end; i++) {
     const line = lines[i] as string;
     if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
-    const m = /^([A-Za-z][A-Za-z0-9-]*):(.*)$/.exec(line);
+    // [\s\S] rather than ".", because "." does not match U+2028 or U+2029.
+    const m = /^([A-Za-z][A-Za-z0-9-]*):([\s\S]*)$/.exec(line);
     if (!m) return null;
     const key = m[1] as string;
     // Drop a trailing comment that starts with whitespace then "#". A "#" inside a value is kept.
