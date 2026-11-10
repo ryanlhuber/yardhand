@@ -10,7 +10,7 @@ import { setField, parseFrontMatter } from "../src/frontmatter.js";
 import { upsertBlock } from "../src/block.js";
 
 function repo(statuses = ["backlog", "in-progress", "done"]): string {
-  const root = mkdtempSync(join(tmpdir(), "lolo-"));
+  const root = mkdtempSync(join(tmpdir(), "yardhand-"));
   init(root, statuses, "0.0.0");
   return root;
 }
@@ -50,17 +50,17 @@ test("front matter: setField keeps comments and other lines", () => {
 });
 
 test("block: replaces only the marked block", () => {
-  const first = upsertBlock("# Notes\n\nkeep me\n", "<!-- lolo:start -->\nA\n<!-- lolo:end -->");
-  const second = upsertBlock(first, "<!-- lolo:start -->\nB\n<!-- lolo:end -->");
+  const first = upsertBlock("# Notes\n\nkeep me\n", "<!-- yardhand:start -->\nA\n<!-- yardhand:end -->");
+  const second = upsertBlock(first, "<!-- yardhand:start -->\nB\n<!-- yardhand:end -->");
   assert.match(second, /keep me/);
   assert.match(second, /\nB\n/);
   assert.doesNotMatch(second, /\nA\n/);
-  assert.equal(second.split("lolo:start").length, 2);
+  assert.equal(second.split("yardhand:start").length, 2);
 });
 
 test("init: creates statuses, config, 000, and the AGENTS.md block", () => {
   const root = repo(["backlog", "review-1", "merge-ready", "done"]);
-  assert.deepEqual(JSON.parse(read(root, "issues/lolo.json")), {
+  assert.deepEqual(JSON.parse(read(root, "issues/yardhand.json")), {
     statuses: ["backlog", "review-1", "merge-ready", "done"],
   });
   for (const s of ["backlog", "review-1", "merge-ready", "done"]) {
@@ -73,15 +73,15 @@ test("init: creates statuses, config, 000, and the AGENTS.md block", () => {
 });
 
 test("init: updates CLAUDE.md when present, refuses to overwrite config, validates statuses", () => {
-  const root = mkdtempSync(join(tmpdir(), "lolo-"));
+  const root = mkdtempSync(join(tmpdir(), "yardhand-"));
   writeFileSync(join(root, "CLAUDE.md"), "# Mine\n");
   init(root, ["backlog", "done"], "0.0.0");
-  assert.match(read(root, "CLAUDE.md"), /# Mine[\s\S]*lolo:start/);
+  assert.match(read(root, "CLAUDE.md"), /# Mine[\s\S]*yardhand:start/);
   assert.throws(() => init(root, ["backlog", "done"], "0.0.0"), /Already initialized/);
   assert.doesNotThrow(() => init(root, ["backlog", "blocked", "done"], "0.0.0", true));
-  assert.throws(() => init(mkdtempSync(join(tmpdir(), "lolo-")), ["done", "backlog"], "0.0.0"), /first status/);
-  assert.throws(() => init(mkdtempSync(join(tmpdir(), "lolo-")), ["backlog", "Bad Name", "done"], "0.0.0"), /kebab/);
-  assert.throws(() => init(mkdtempSync(join(tmpdir(), "lolo-")), ["backlog", "x", "x", "done"], "0.0.0"), /more than once/);
+  assert.throws(() => init(mkdtempSync(join(tmpdir(), "yardhand-")), ["done", "backlog"], "0.0.0"), /first status/);
+  assert.throws(() => init(mkdtempSync(join(tmpdir(), "yardhand-")), ["backlog", "Bad Name", "done"], "0.0.0"), /kebab/);
+  assert.throws(() => init(mkdtempSync(join(tmpdir(), "yardhand-")), ["backlog", "x", "x", "done"], "0.0.0"), /more than once/);
 });
 
 test("new: allocates IDs, counts done/, and never reuses", () => {
@@ -190,12 +190,12 @@ test("commands find the repo root from a subfolder", () => {
 
 test("CLI end to end", () => {
   const bin = resolve("dist/cli.js");
-  const root = mkdtempSync(join(tmpdir(), "lolo-cli-"));
+  const root = mkdtempSync(join(tmpdir(), "yardhand-cli-"));
   const run = (...args: string[]) =>
     spawnSync("node", [bin, ...args], { cwd: root, encoding: "utf8" });
 
   assert.equal(run("validate").status, 1, "no config yet");
-  assert.match(run("validate").stderr, /Run "lolo init" first/);
+  assert.match(run("validate").stderr, /Run "yardhand init" first/);
   assert.equal(run("init").status, 1, "no terminal and no --yes");
   const init1 = run("init", "--yes", "--statuses", "backlog,review-1,done");
   assert.equal(init1.status, 0, init1.stderr);

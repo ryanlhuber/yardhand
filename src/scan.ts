@@ -1,7 +1,7 @@
 import { lstatSync, readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { ISSUES_DIR, ISSUE_FILE } from "./names.js";
-import { LoloError } from "./errors.js";
+import { YardhandError } from "./errors.js";
 import { leadingId } from "./ids.js";
 import type { Config } from "./config.js";
 
@@ -26,7 +26,7 @@ export interface Scan {
   badStatusPaths: string[];
   /** Entries that could not be inspected (permissions, I/O errors), relative to issues/. */
   unreadable: string[];
-  /** Symlinks under issues/ (relative to issues/). Lolo does not follow them. */
+  /** Symlinks under issues/ (relative to issues/). Yardhand does not follow them. */
   symlinks: string[];
 }
 
@@ -82,7 +82,7 @@ export function scan(root: string, config: Config): Scan {
   try {
     top = readdirSync(base).sort();
   } catch (err) {
-    throw new LoloError(`Cannot read ${ISSUES_DIR}/ (${(err as NodeJS.ErrnoException).code ?? "error"}).`);
+    throw new YardhandError(`Cannot read ${ISSUES_DIR}/ (${(err as NodeJS.ErrnoException).code ?? "error"}).`);
   }
   for (const entry of top) {
     // Dot entries (such as the lock) are tool internals, not statuses.
@@ -145,22 +145,22 @@ const list = (items: string[]) => items.join(", ");
  */
 export function assertComplete(s: Scan): void {
   if (s.badStatusPaths.length) {
-    throw new LoloError(
+    throw new YardhandError(
       `Cannot read status folder${s.badStatusPaths.length > 1 ? "s" : ""}: ${list(s.badStatusPaths)}. Fix that first so no existing ID is missed.`,
     );
   }
   if (s.unreadable.length) {
-    throw new LoloError(
+    throw new YardhandError(
       `Cannot inspect: ${list(s.unreadable)}. Fix the permissions first so no existing ID is missed.`,
     );
   }
   if (s.strayIssues.length) {
-    throw new LoloError(
+    throw new YardhandError(
       `${list(s.strayIssues)} ${s.strayIssues.length > 1 ? "are not statuses but hold" : "is not a status but holds"} issues, or cannot be fully read. Add ${s.strayIssues.length > 1 ? "them" : "it"} to the status list or move the issues, so no existing ID is missed.`,
     );
   }
   if (s.symlinks.length) {
-    throw new LoloError(
+    throw new YardhandError(
       `Symlinks under ${ISSUES_DIR}/ are not supported: ${list(s.symlinks)}. Replace them with real folders and files.`,
     );
   }
