@@ -2,16 +2,19 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
-import { LoloError } from "./errors.js";
+import { LoloError, NotInitializedError } from "./errors.js";
 import { CONFIG_FILE, ISSUES_DIR, ISSUE_FILE, TOOL } from "./names.js";
 import {
   type Config,
+  assertIssuesDirIsReal,
   findRoot,
   loadConfig,
   statusProblems,
@@ -34,7 +37,10 @@ import { applyBlocks, planBlocks, renderBlock } from "./block.js";
 import { withLock } from "./lock.js";
 
 const errCode = (err: unknown) => (err as NodeJS.ErrnoException).code ?? "error";
-const TMP_FILE = `.${ISSUE_FILE}.tmp`;
+// Temp files for a status rewrite: a random name, created exclusively, so an existing file,
+// hard link, or symlink at a guessable path can never be written through.
+const tmpName = () => `.${ISSUE_FILE}.${randomBytes(6).toString("hex")}.tmp`;
+const TMP_RE = new RegExp(`^\\.${ISSUE_FILE.replace(/\./g, "\\.")}\\..+\\.tmp$`);
 
 /** Cleanup must never hide the error that caused it. */
 function tryRemove(path: string): void {
@@ -44,8 +50,8 @@ function tryRemove(path: string): void {
     // ignored on purpose
   }
 }
-// Control characters, Unicode line/paragraph separators, and "#" could change how the file parses.
-const UNSAFE_ASSIGNEE = new RegExp("[\\u0000-\\u001f\\u007f\\u2028\\u2029#]");
+// Control characters (C0, DEL, and C1), Unicode line/paragraph separators, and "#" could change how the file parses.
+const UNSAFE_ASSIGNEE = new RegExp("[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029#]");
 
 export interface InitResult {
   root: string;
@@ -62,12 +68,13 @@ export function init(
   const problems = statusProblems(statuses);
   if (problems.length) throw new LoloError(problems.join(" "));
 
-  // Like every other command, init works from the existing root when there is one.
+  // Like every other command, init works from the existing root when there is one. Only
+  // "not set up yet" means start fresh; a root that is there but unreadable is an error.
   let existing: string | null = null;
   try {
     existing = findRoot(cwd);
-  } catch {
-    // Not initialized yet, which is the normal case.
+  } catch (err) {
+    if (!(err instanceof NotInitializedError)) throw err;
   }
   if (existing && !force) {
     const where = rel(resolve(cwd), existing);
@@ -77,41 +84,47 @@ export function init(
   }
   const root = existing ?? resolve(cwd);
   const config: Config = { statuses };
+  assertIssuesDirIsReal(root);
 
-  // Refuse before changing anything: a config that drops a status holding issues would hide
-  // those issues, and their IDs would be handed out again.
-  if (existing) {
-    const stray = scan(root, config).strayIssues;
-    if (stray.length) {
-      throw new LoloError(
-        `These folders hold issues but are not in the new status list: ${stray.join(", ")}. Add them to --statuses, or move the issues first.`,
-      );
-    }
-  }
   // Plan the AGENTS.md / CLAUDE.md updates first: damaged markers must fail before anything is written.
   const plan = planBlocks(root, renderBlock(config, version));
 
   mkdirSync(join(root, ISSUES_DIR), { recursive: true });
-  writeFileSync(
-    join(root, ISSUES_DIR, CONFIG_FILE),
-    JSON.stringify(config, null, 2) + "\n",
-  );
-  for (const status of statuses) {
-    const dir = join(root, ISSUES_DIR, status);
-    mkdirSync(dir, { recursive: true });
-    const keep = join(dir, ".gitkeep");
-    if (!existsSync(keep)) writeFileSync(keep, "");
-  }
-  // 000 is the catch-all parent for maintenance and bugs with no clear home.
-  if (!allIds(scan(root, config)).includes("000")) {
-    const first = statuses[0] as string;
-    const dir = join(root, ISSUES_DIR, first, folderName("000", "maintain-repo"));
-    mkdirSync(dir, { recursive: true });
+  // Everything that reads or changes issues/ happens under the same lock as new and move.
+  withLock(root, () => {
+    // Refuse before changing anything unless every existing ID is visible. A status list that
+    // drops a folder holding issues, or a part of the tree that cannot be read, would hide
+    // IDs and let them be handed out again.
+    assertComplete(scan(root, config));
+    const hasCatchAll = allIds(scan(root, config)).includes("000");
+
     writeFileSync(
-      join(dir, ISSUE_FILE),
-      renderIssue({ id: "000", kind: "task", parent: null, status: first, assignee: "" }),
+      join(root, ISSUES_DIR, CONFIG_FILE),
+      JSON.stringify(config, null, 2) + "\n",
     );
-  }
+    for (const status of statuses) {
+      const dir = join(root, ISSUES_DIR, status);
+      mkdirSync(dir, { recursive: true });
+      const keep = join(dir, ".gitkeep");
+      if (!existsSync(keep)) writeFileSync(keep, "");
+    }
+    // 000 is the catch-all parent for maintenance and bugs with no clear home. Created with
+    // exclusive operations, so an existing issue can never be overwritten.
+    if (!hasCatchAll) {
+      const first = statuses[0] as string;
+      const dir = join(root, ISSUES_DIR, first, folderName("000", "maintain-repo"));
+      try {
+        mkdirSync(dir);
+        writeFileSync(
+          join(dir, ISSUE_FILE),
+          renderIssue({ id: "000", kind: "task", parent: null, status: first, assignee: "" }),
+          { flag: "wx" },
+        );
+      } catch (err) {
+        if (errCode(err) !== "EEXIST") throw err;
+      }
+    }
+  });
   return { root, statuses, blocks: applyBlocks(plan) };
 }
 
@@ -212,10 +225,12 @@ export function moveIssue(cwd: string, id: string, status: string): { from: stri
     // damage the temp file. Then: move the folder, and rename the temp file over ISSUE.md
     // (an atomic replace). If that last step fails, move the folder back. The original
     // ISSUE.md is untouched until the final rename, so the folder and the status field
-    // cannot disagree, short of the move-back itself failing, which is reported.
-    const tmp = join(issue.dir, TMP_FILE);
+    // cannot disagree, short of the move-back itself failing, which is reported. A crash
+    // between the two renames leaves a mismatch and a temp file, both of which validate reports.
+    const name = tmpName();
+    const tmp = join(issue.dir, name);
     try {
-      writeFileSync(tmp, updated);
+      writeFileSync(tmp, updated, { flag: "wx" });
     } catch (err) {
       tryRemove(tmp);
       throw new LoloError(`Could not write the new status (${errCode(err)}). Nothing was moved.`);
@@ -228,7 +243,7 @@ export function moveIssue(cwd: string, id: string, status: string): { from: stri
       throw new LoloError(`Could not move ${rel(root, issue.dir)} (${errCode(err)}). Nothing was moved.`);
     }
     try {
-      renameSync(join(dest, TMP_FILE), join(dest, ISSUE_FILE));
+      renameSync(join(dest, name), join(dest, ISSUE_FILE));
     } catch (err) {
       try {
         renameSync(dest, issue.dir);
@@ -237,7 +252,7 @@ export function moveIssue(cwd: string, id: string, status: string): { from: stri
           `${rel(root, dest)} was moved to ${status} but its status field still says ${issue.status}, and it could not be moved back (${errCode(err)}). Move it back by hand, or fix the field.`,
         );
       }
-      tryRemove(join(issue.dir, TMP_FILE));
+      tryRemove(join(issue.dir, name));
       throw new LoloError(`Could not update ${ISSUE_FILE} (${errCode(err)}). Nothing was moved.`);
     }
     return { from: rel(root, issue.dir), to: rel(root, dest) };
@@ -250,13 +265,19 @@ export interface Problem {
 }
 
 export function validate(cwd: string): Problem[] {
-  const root = findRoot(cwd);
   const out: Problem[] = [];
   try {
-    collect(root, out);
+    collect(findRoot(cwd), out);
   } catch (err) {
-    // A filesystem surprise must not discard what was already found.
-    out.push({ path: ISSUES_DIR, message: `Could not finish checking (${errCode(err)}${err instanceof Error ? `: ${err.message}` : ""}).` });
+    // Root discovery and filesystem surprises are findings too, and must not discard what was
+    // already found.
+    out.push({
+      path: ISSUES_DIR,
+      message:
+        err instanceof LoloError
+          ? err.message
+          : `Could not finish checking (${errCode(err)}${err instanceof Error ? `: ${err.message}` : ""}).`,
+    });
   }
   return out;
 }
@@ -286,6 +307,9 @@ function collect(root: string, out: Problem[]): void {
   for (const link of s.symlinks) {
     out.push({ path: `${ISSUES_DIR}/${link}`, message: "Symlinks are not supported." });
   }
+  for (const u of s.unreadable) {
+    out.push({ path: `${ISSUES_DIR}/${u}`, message: "Cannot be inspected (permissions or I/O error)." });
+  }
 
   interface Known {
     id: string;
@@ -294,6 +318,8 @@ function collect(root: string, out: Problem[]): void {
   }
   const byId = new Map<string, Known[]>();
   const withFields: { known: Known; fields: Record<string, string> }[] = [];
+  // Folders with no recognizable ID: they still get the checks that do not need the folder ID.
+  const idless: { path: string; fields: Record<string, string> }[] = [];
 
   for (const issue of s.issues) {
     const path = rel(root, issue.dir);
@@ -308,14 +334,26 @@ function collect(root: string, out: Problem[]): void {
       : null;
     if (known) byId.set(known.id, [...(byId.get(known.id) ?? []), known]);
 
+    // A move that was interrupted between its two renames leaves a temp file behind.
+    try {
+      for (const name of readdirSync(issue.dir)) {
+        if (TMP_RE.test(name)) {
+          out.push({
+            path: `${path}/${name}`,
+            message: `Leftover temp file from an interrupted move. The status field may not match the folder: check ${ISSUE_FILE}, then delete the temp file (or rename it over ${ISSUE_FILE} to finish the move).`,
+          });
+        }
+      }
+    } catch {
+      // Unreadable folders are reported by the scan.
+    }
+
     const file = join(issue.dir, ISSUE_FILE);
     const here = rel(root, file);
     let text: string;
     try {
-      if (lstatSync(file).isSymbolicLink()) {
-        out.push({ path: here, message: "Symlinks are not supported." });
-        continue;
-      }
+      // A symlinked ISSUE.md is already reported by the scan; do not read through it.
+      if (lstatSync(file).isSymbolicLink()) continue;
       text = readFileSync(file, "utf8");
     } catch (err) {
       out.push({
@@ -331,6 +369,7 @@ function collect(root: string, out: Problem[]): void {
     }
     const f = fm.fields;
     if (known) withFields.push({ known, fields: f });
+    else idless.push({ path, fields: f });
 
     for (const key of fm.duplicates) {
       out.push({ path: here, message: `Field "${key}" appears more than once.` });
@@ -358,6 +397,20 @@ function collect(root: string, out: Problem[]): void {
         path: list.map((k) => k.path).join(", "),
         message: `ID ${id} is used more than once.`,
       });
+    }
+  }
+
+  // Folders with no valid ID: report what can be checked without it.
+  for (const { path, fields } of idless) {
+    const here = `${path}/${ISSUE_FILE}`;
+    if (fields["id"] === undefined || fields["id"] === "") {
+      out.push({ path: here, message: "id is required." });
+    } else if (!isValidId(fields["id"])) {
+      out.push({ path: here, message: `id "${fields["id"]}" is not a valid ID.` });
+    }
+    const parent = fields["parent"];
+    if (parent && (!isValidId(parent) || !byId.has(parent))) {
+      out.push({ path: here, message: `parent ${parent} does not exist.` });
     }
   }
 

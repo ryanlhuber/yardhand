@@ -1,7 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
+import { lstatSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { CONFIG_FILE, ISSUES_DIR, TOOL } from "./names.js";
-import { LoloError } from "./errors.js";
+import { LoloError, NotInitializedError } from "./errors.js";
 import { STATUS_RE } from "./ids.js";
 
 export interface Config {
@@ -42,14 +42,40 @@ export function parseConfig(text: string): Config {
   return { statuses: statuses as string[] };
 }
 
+/** issues/ must be a real folder. Lolo never follows a symlink there. */
+export function assertIssuesDirIsReal(root: string): void {
+  try {
+    if (lstatSync(join(root, ISSUES_DIR)).isSymbolicLink()) {
+      throw new LoloError(`${ISSUES_DIR}/ is a symlink. ${TOOL} does not follow symlinks.`);
+    }
+  } catch (err) {
+    if (err instanceof LoloError) throw err;
+    // Missing is fine here; other errors surface where the folder is used.
+  }
+}
+
 /** Walk upward from `start` to find the repo root, the folder that holds issues/lolo.json. */
 export function findRoot(start: string): string {
   let dir = resolve(start);
   for (;;) {
-    if (existsSync(join(dir, ISSUES_DIR, CONFIG_FILE))) return dir;
+    try {
+      statSync(join(dir, ISSUES_DIR, CONFIG_FILE));
+      // Found. If it was reached through a symlinked issues/, refuse; an unrelated symlink
+      // named issues/ in some parent folder is not our concern.
+      assertIssuesDirIsReal(dir);
+      return dir;
+    } catch (err) {
+      if (err instanceof LoloError) throw err;
+      const code = (err as NodeJS.ErrnoException).code;
+      // Absent is the normal "keep looking". Anything else means issues/ is there but cannot be
+      // read, and walking past it would hide the real problem.
+      if (code !== "ENOENT" && code !== "ENOTDIR") {
+        throw new LoloError(`Cannot read ${ISSUES_DIR}/${CONFIG_FILE} in ${dir} (${code ?? "error"}).`);
+      }
+    }
     const up = dirname(dir);
     if (up === dir) {
-      throw new LoloError(`No ${ISSUES_DIR}/${CONFIG_FILE} found. Run "${TOOL} init" first.`);
+      throw new NotInitializedError(`No ${ISSUES_DIR}/${CONFIG_FILE} found. Run "${TOOL} init" first.`);
     }
     dir = up;
   }

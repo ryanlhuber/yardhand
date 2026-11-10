@@ -1,6 +1,6 @@
 import { lstatSync, readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { ISSUES_DIR } from "./names.js";
+import { ISSUES_DIR, ISSUE_FILE } from "./names.js";
 import { LoloError } from "./errors.js";
 import { leadingId } from "./ids.js";
 import type { Config } from "./config.js";
@@ -18,12 +18,14 @@ export interface Scan {
   issues: IssueDir[];
   /** Folders directly under issues/ that are not a configured status. */
   unknownDirs: string[];
-  /** Unknown folders that hold issue-looking folders, so IDs in them would be invisible. */
+  /** Unknown folders that hold, or may hold, issue folders, so IDs in them would be invisible. */
   strayIssues: string[];
   /** Configured statuses with no folder. */
   missingStatuses: string[];
-  /** Configured statuses whose path exists but is a plain file, or cannot be read. */
+  /** Configured statuses whose path is a plain file, or cannot be listed. */
   badStatusPaths: string[];
+  /** Entries that could not be inspected (permissions, I/O errors), relative to issues/. */
+  unreadable: string[];
   /** Symlinks under issues/ (relative to issues/). Lolo does not follow them. */
   symlinks: string[];
 }
@@ -32,22 +34,35 @@ export interface Scan {
 export const rel = (root: string, p: string): string =>
   relative(root, p).split(sep).join("/");
 
-type Kind = "dir" | "file" | "link" | "none";
+// "error" means the entry exists but could not be inspected. It is never treated as "absent":
+// an entry we cannot see might hold IDs that are already taken.
+type Kind = "dir" | "file" | "link" | "none" | "error";
 const kindOf = (p: string): Kind => {
   try {
     const st = lstatSync(p);
     return st.isSymbolicLink() ? "link" : st.isDirectory() ? "dir" : "file";
-  } catch {
-    return "none";
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR" ? "none" : "error";
   }
 };
 
-function holdsIssues(dir: string): boolean {
+/** Does this unknown folder hold issue folders? "unknown" when it cannot be fully inspected. */
+function holdsIssues(dir: string): "yes" | "no" | "unknown" {
+  let entries: string[];
   try {
-    return readdirSync(dir).some((e) => leadingId(e) !== null && kindOf(join(dir, e)) === "dir");
+    entries = readdirSync(dir);
   } catch {
-    return false;
+    return "unknown";
   }
+  let result: "yes" | "no" | "unknown" = "no";
+  for (const e of entries) {
+    if (leadingId(e) === null) continue;
+    const k = kindOf(join(dir, e));
+    if (k === "dir") return "yes";
+    if (k === "error") result = "unknown";
+  }
+  return result;
 }
 
 /** List every issue folder across all status folders, done included. Never throws on filesystem shape. */
@@ -59,17 +74,26 @@ export function scan(root: string, config: Config): Scan {
     strayIssues: [],
     missingStatuses: [],
     badStatusPaths: [],
+    unreadable: [],
     symlinks: [],
   };
 
-  for (const entry of readdirSync(base).sort()) {
+  let top: string[];
+  try {
+    top = readdirSync(base).sort();
+  } catch (err) {
+    throw new LoloError(`Cannot read ${ISSUES_DIR}/ (${(err as NodeJS.ErrnoException).code ?? "error"}).`);
+  }
+  for (const entry of top) {
     // Dot entries (such as the lock) are tool internals, not statuses.
     if (entry.startsWith(".") || config.statuses.includes(entry)) continue;
     const kind = kindOf(join(base, entry));
     if (kind === "link") out.symlinks.push(entry);
+    if (kind === "error") out.unreadable.push(entry);
     if (kind === "dir") {
       out.unknownDirs.push(entry);
-      if (holdsIssues(join(base, entry))) out.strayIssues.push(entry);
+      const holds = holdsIssues(join(base, entry));
+      if (holds !== "no") out.strayIssues.push(entry);
     }
   }
   for (const status of config.statuses) {
@@ -83,7 +107,7 @@ export function scan(root: string, config: Config): Scan {
       out.symlinks.push(status);
       continue;
     }
-    if (kind === "file") {
+    if (kind === "file" || kind === "error") {
       out.badStatusPaths.push(status);
       continue;
     }
@@ -98,8 +122,12 @@ export function scan(root: string, config: Config): Scan {
       const dir = join(statusDir, folder);
       const k = kindOf(dir);
       if (k === "link") out.symlinks.push(`${status}/${folder}`);
+      if (k === "error") out.unreadable.push(`${status}/${folder}`);
       if (k !== "dir") continue;
       out.issues.push({ id: leadingId(folder), folder, status, dir });
+      const f = kindOf(join(dir, ISSUE_FILE));
+      if (f === "link") out.symlinks.push(`${status}/${folder}/${ISSUE_FILE}`);
+      if (f === "error") out.unreadable.push(`${status}/${folder}/${ISSUE_FILE}`);
     }
   }
   return out;
@@ -109,6 +137,8 @@ export function allIds(s: Scan): string[] {
   return s.issues.flatMap((i) => (i.id ? [i.id] : []));
 }
 
+const list = (items: string[]) => items.join(", ");
+
 /**
  * Creating or moving issues needs a complete picture of every existing ID. If part of the
  * tree could not be seen, refuse rather than risk handing out an ID that is already taken.
@@ -116,17 +146,22 @@ export function allIds(s: Scan): string[] {
 export function assertComplete(s: Scan): void {
   if (s.badStatusPaths.length) {
     throw new LoloError(
-      `Cannot read status folder${s.badStatusPaths.length > 1 ? "s" : ""}: ${s.badStatusPaths.join(", ")}. Fix that first so no existing ID is missed.`,
+      `Cannot read status folder${s.badStatusPaths.length > 1 ? "s" : ""}: ${list(s.badStatusPaths)}. Fix that first so no existing ID is missed.`,
+    );
+  }
+  if (s.unreadable.length) {
+    throw new LoloError(
+      `Cannot inspect: ${list(s.unreadable)}. Fix the permissions first so no existing ID is missed.`,
     );
   }
   if (s.strayIssues.length) {
     throw new LoloError(
-      `Folder${s.strayIssues.length > 1 ? "s" : ""} under ${ISSUES_DIR}/ hold${s.strayIssues.length > 1 ? "" : "s"} issues but ${s.strayIssues.length > 1 ? "are" : "is"} not a status: ${s.strayIssues.join(", ")}. Add the status back to the config or move the issues, so no existing ID is missed.`,
+      `${list(s.strayIssues)} ${s.strayIssues.length > 1 ? "are not statuses but hold" : "is not a status but holds"} issues, or cannot be fully read. Add ${s.strayIssues.length > 1 ? "them" : "it"} to the status list or move the issues, so no existing ID is missed.`,
     );
   }
   if (s.symlinks.length) {
     throw new LoloError(
-      `Symlinks under ${ISSUES_DIR}/ are not supported: ${s.symlinks.join(", ")}. Replace them with real folders.`,
+      `Symlinks under ${ISSUES_DIR}/ are not supported: ${list(s.symlinks)}. Replace them with real folders and files.`,
     );
   }
 }

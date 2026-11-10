@@ -74,11 +74,16 @@ const splitList = (v: string) =>
 
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
-  if (!command || command === "--help" || command === "-h" || command === "help") {
+  const isHelp = !command || command === "--help" || command === "-h" || command === "help";
+  const isVersion = command === "--version" || command === "-v";
+  if ((isHelp || isVersion) && rest.length > 0) {
+    throw new LoloError(`Unexpected argument "${rest[0]}". Run "${TOOL} --help".`);
+  }
+  if (isHelp) {
     process.stdout.write(HELP);
     return 0;
   }
-  if (command === "--version" || command === "-v") {
+  if (isVersion) {
     process.stdout.write(pkg.version + "\n");
     return 0;
   }
