@@ -6,6 +6,18 @@ Working name. The name is defined in one place (`src/names.ts`).
 
 ## Use
 
+Run it with whichever package manager your project uses. Node 20 or newer is required (bun runs it through Node).
+
+| Package manager | Run a command |
+|---|---|
+| npm | `npx yardhand@latest <command>` |
+| pnpm | `pnpm dlx yardhand@latest <command>` |
+| bun | `bunx yardhand@latest <command>` |
+
+Use your project's own runner. If its `package.json` pins a package manager (`devEngines` or `packageManager`), npm refuses to run in a pnpm project (error `EBADDEVENGINES`), so use `pnpm dlx` there.
+
+The examples below use `npx`. Swap in `pnpm dlx` or `bunx`.
+
 ```sh
 npx yardhand init          # pick statuses; creates issues/ and an AGENTS.md block
 npx yardhand new add-auth  # -> 001 issues/backlog/001-add-auth/ISSUE.md
