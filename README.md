@@ -16,7 +16,7 @@ Run it with whichever package manager your project uses. Node 20 or newer is req
 
 Use your project's own runner. If its `package.json` pins a package manager (`devEngines` or `packageManager`), npm refuses to run in a pnpm project (error `EBADDEVENGINES`), so use `pnpm dlx` there.
 
-The examples below use `npx`. Swap in `pnpm dlx` or `bunx`.
+Every example below shows the `npx` command, then the `pnpm dlx` command, then the `bunx` command. They do the same thing, so use the one for your project.
 
 Nothing is installed into your project. `init` writes plain files only: `issues/`, `issues/yardhand.json`, and a generated block in `AGENTS.md` (and `CLAUDE.md` if present) that tells models how to use the tracker.
 
@@ -92,9 +92,11 @@ released-in:
 
 ```sh
 npx yardhand init --yes --statuses backlog,in-progress,done
+pnpm dlx yardhand init --yes --statuses backlog,in-progress,done
+bunx yardhand init --yes --statuses backlog,in-progress,done
 ```
 
-- `npx yardhand`: run yardhand.
+- `npx yardhand` (or `pnpm dlx yardhand`, or `bunx yardhand`): run yardhand.
 - `init`: set up issue tracking in this repo. Run it once, from the repo root. Without any options it asks you which statuses you want. `backlog` and `done` are always included.
 - `--yes` (or `-y`): skip the questions and use the defaults. Use this for scripts and models, since there is no one to answer.
 - `--statuses backlog,in-progress,done`: your statuses, in order, separated by commas. The first is where new issues start, and the last is the final one. `backlog` must be first and `done` must be last. Without this option, `--yes` uses `backlog,in-progress,done`.
@@ -106,9 +108,11 @@ What it creates: the `issues/` folder, `issues/yardhand.json`, one folder per st
 
 ```sh
 npx yardhand new add-login --parent 017 --kind task --assignee codex
+pnpm dlx yardhand new add-login --parent 017 --kind task --assignee codex
+bunx yardhand new add-login --parent 017 --kind task --assignee codex
 ```
 
-- `npx yardhand`: run yardhand.
+- `npx yardhand` (or `pnpm dlx yardhand`, or `bunx yardhand`): run yardhand.
 - `new`: create an issue. It picks the next free ID, makes the folder, and writes `ISSUE.md` from the template.
 - `add-login`: the slug. This is required. It becomes part of the folder name, and it should be lowercase kebab-case starting with a verb.
 - `--parent 017`: make this issue a child of `017`, so it gets the ID `017.01` (or the next free one). Without it, you get a new level 1 issue like `018`. The parent must already exist, and it cannot be a level 3 issue, because three levels is the limit.
@@ -121,9 +125,11 @@ It prints the new ID and the path, for example `017.01 issues/backlog/017.01-add
 
 ```sh
 npx yardhand move 017.01 in-progress
+pnpm dlx yardhand move 017.01 in-progress
+bunx yardhand move 017.01 in-progress
 ```
 
-- `npx yardhand`: run yardhand.
+- `npx yardhand` (or `pnpm dlx yardhand`, or `bunx yardhand`): run yardhand.
 - `move`: change an issue's status.
 - `017.01`: the ID of the issue to move.
 - `in-progress`: the status to move it to. It must be one of the statuses in `yardhand.json`.
@@ -134,9 +140,11 @@ It moves the issue folder into the new status folder and updates `status:` in `I
 
 ```sh
 npx yardhand validate
+pnpm dlx yardhand validate
+bunx yardhand validate
 ```
 
-- `npx yardhand`: run yardhand.
+- `npx yardhand` (or `pnpm dlx yardhand`, or `bunx yardhand`): run yardhand.
 - `validate`: check every issue and report every problem with its path. It takes no options.
 
 It checks that:
@@ -155,7 +163,11 @@ It exits with `0` when everything is fine and `1` when there is a problem, so yo
 
 ```sh
 npx yardhand --help
+pnpm dlx yardhand --help
+bunx yardhand --help
 npx yardhand --version
+pnpm dlx yardhand --version
+bunx yardhand --version
 ```
 
 - `--help`: prints the list of commands.
