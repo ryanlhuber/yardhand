@@ -12,6 +12,7 @@ const HELP = `${TOOL} ${pkg.version}: file-based issue tracking
 Usage:
   ${TOOL} init [--yes] [--statuses a,b,c] [--force]
   ${TOOL} new <slug> [--parent <id>] [--kind task|bug] [--assignee <name>]
+             [--priority urgent|high|medium|low] [--depends-on <ids>] [--related <ids>]
   ${TOOL} move <id> <status>
   ${TOOL} validate
   ${TOOL} --help | --version
@@ -124,15 +125,21 @@ async function main(argv: string[]): Promise<number> {
           parent: { type: "string" },
           kind: { type: "string" },
           assignee: { type: "string" },
+          priority: { type: "string" },
+          "depends-on": { type: "string" },
+          related: { type: "string" },
         },
       });
       const slug = positionals[0];
-      if (!slug || positionals.length > 1) throw new YardhandError(`Usage: ${TOOL} new <slug> [--parent <id>] [--kind task|bug]`);
+      if (!slug || positionals.length > 1) throw new YardhandError(`Usage: ${TOOL} new <slug> [--parent <id>] [--kind task|bug] [--assignee <name>] [--priority <level>] [--depends-on <ids>] [--related <ids>]`);
       const r = newIssue(cwd, {
         slug,
         parent: values.parent,
         kind: values.kind as "task" | "bug" | undefined,
         assignee: values.assignee,
+        priority: values.priority,
+        dependsOn: values["depends-on"] === undefined ? undefined : splitList(values["depends-on"]),
+        related: values.related === undefined ? undefined : splitList(values.related),
       });
       process.stdout.write(`${r.id} ${r.path}\n`);
       return 0;

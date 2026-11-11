@@ -57,6 +57,9 @@ id: 017.01.01
 kind: task
 parent: 017.01
 status: backlog
+priority:
+depends-on:
+related:
 assignee:
 released-in:
 ---
@@ -70,6 +73,9 @@ released-in:
 - `kind`: required, `task` or `bug`.
 - `parent`: required for levels 2 and 3 and must be the ID with its last segment removed. Omitted for level 1. See "Moving work to a different parent" for the one exception.
 - `status`: required. Must equal the name of the status folder the issue is in.
+- `priority`: optional. One of `urgent`, `high`, `medium`, `low`. Empty means no priority.
+- `depends-on`: optional. A comma-separated list of issue IDs that must be finished first, for example `017.02, 017.03`. The link is stored on the dependent issue only; there is no reverse field. A `depends-on` loop (A needs B and B needs A) is an error.
+- `related`: optional. A comma-separated list of issue IDs that are linked but do not block this issue. Related links may point both ways.
 - `assignee`: optional single-line text. `yardhand new` rejects an assignee that contains a control character (C0, DEL, or C1, a newline or tab included), a Unicode line or paragraph separator (U+2028, U+2029), or `#`. The check is on the value as given, before any trimming; surrounding spaces are then trimmed.
 - `released-in`: optional semver (the grammar at semver.org: no leading zeros, no empty identifiers), set when shipped.
 - Front matter is a simple `key: value` block between `---` lines. A comment starts with `#` at the start of a value or after whitespace; a `#` inside a word is part of the value. No nesting. A key may appear only once. Both LF and CRLF line endings are accepted.
@@ -96,9 +102,9 @@ Non-interactive: `yardhand init --yes [--statuses a,b,c]`. Defaults to `backlog,
 
 Creates `issues/`, `issues/yardhand.json`, and one folder per status (with a `.gitkeep` in each empty one). Creates the catch-all `000-maintain-repo` issue in the first status, so `000.NN` children (maintenance, bugs with no clear home) have a parent. Adds or updates the Yardhand block in `AGENTS.md`, and in `CLAUDE.md` if that file exists. Prints the Depot install command as a suggestion. Never runs it. Refuses to overwrite an existing `yardhand.json` unless `--force`. It takes the same lock as `new` and `move`, and runs the same completeness check, so a status list that omits a folder holding issues, or a tree it cannot fully read, is refused before anything is written. The catch-all is created with exclusive operations and is never overwritten. If `issues/` exists but cannot be read, `init` fails; it only starts fresh when nothing is set up. It validates `--statuses` even when it is empty.
 
-### `yardhand new <slug> [--parent <id>] [--kind task|bug] [--assignee <name>]`
+### `yardhand new <slug> [--parent <id>] [--kind task|bug] [--assignee <name>] [--priority <level>] [--depends-on <ids>] [--related <ids>]`
 
-Allocates the next ID, creates `issues/<first-status>/<id>-<slug>/ISSUE.md` from the template, and prints the ID and the path. With no `--parent` it creates a level-1 issue. Fails if the parent does not exist or the parent is already level 3.
+Allocates the next ID, creates `issues/<first-status>/<id>-<slug>/ISSUE.md` from the template, and prints the ID and the path. With no `--parent` it creates a level-1 issue. Fails if the parent does not exist or the parent is already level 3. `--priority` must be one of the four levels. `--depends-on` and `--related` take comma-separated IDs, and every ID must already exist. A failed `new` creates nothing.
 
 ### `yardhand move <id> <status>`
 
@@ -119,6 +125,9 @@ Checks and reports every problem with its path, and keeps going after a problem;
 9. `parent` exists. A level 1 issue omits the field entirely (an empty `parent:` is an error). For levels 2 and 3, `parent` is non-empty, exists, and has a shallower depth.
 10. `released-in`, if set, is valid semver.
 11. No key appears twice in the front matter.
+12. `priority`, if set, is `urgent`, `high`, `medium`, or `low`.
+13. Every ID in `depends-on` and `related` is valid, exists, and is not the issue itself.
+14. `depends-on` has no loops.
 
 ### Exit codes
 

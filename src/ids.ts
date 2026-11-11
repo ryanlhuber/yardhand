@@ -73,3 +73,16 @@ export function nextChild(parent: string, existing: Iterable<string>): string {
   if (max >= 99) throw new YardhandError(`No child IDs left under ${parent} (99 is the maximum).`);
   return `${parent}.${pad(max + 1, 2)}`;
 }
+
+/** Allowed `priority:` values. An empty value means no priority. */
+export const PRIORITIES = ["urgent", "high", "medium", "low"] as const;
+
+/** Split a comma-separated list of IDs, dropping blanks and repeats. */
+export function splitIdList(value: string): string[] {
+  const out: string[] = [];
+  for (const part of value.split(",")) {
+    const id = part.trim();
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}

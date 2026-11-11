@@ -21,6 +21,7 @@ import {
 } from "./config.js";
 import { allIds, assertComplete, rel, scan } from "./scan.js";
 import {
+  PRIORITIES,
   SEMVER_RE,
   SLUG_RE,
   depth,
@@ -30,6 +31,7 @@ import {
   nextTopLevel,
   parentOf,
   parseFolderName,
+  splitIdList,
 } from "./ids.js";
 import { parseFrontMatter, setField } from "./frontmatter.js";
 import { renderIssue } from "./template.js";
@@ -133,6 +135,9 @@ export interface NewOptions {
   parent?: string;
   kind?: "task" | "bug";
   assignee?: string;
+  priority?: string;
+  dependsOn?: string[];
+  related?: string[];
 }
 
 export function newIssue(cwd: string, opts: NewOptions): { id: string; path: string } {
@@ -152,6 +157,16 @@ export function newIssue(cwd: string, opts: NewOptions): { id: string; path: str
   if (opts.parent !== undefined && !isValidId(opts.parent)) {
     throw new YardhandError(`"${opts.parent}" is not a valid ID.`);
   }
+  const priority = opts.priority ?? "";
+  if (priority !== "" && !(PRIORITIES as readonly string[]).includes(priority)) {
+    throw new YardhandError(`--priority must be one of: ${PRIORITIES.join(", ")}.`);
+  }
+  const dependsOn = [...new Set(opts.dependsOn ?? [])];
+  const related = [...new Set(opts.related ?? [])];
+  for (const [flag, list] of [["--depends-on", dependsOn], ["--related", related]] as const) {
+    const bad = list.find((x) => !isValidId(x));
+    if (bad !== undefined) throw new YardhandError(`${flag}: "${bad}" is not a valid ID.`);
+  }
 
   // Scan, allocate, and create under one lock so concurrent runs cannot share an ID.
   return withLock(root, () => {
@@ -164,6 +179,10 @@ export function newIssue(cwd: string, opts: NewOptions): { id: string; path: str
       id = nextChild(opts.parent, ids);
     } else {
       id = nextTopLevel(ids);
+    }
+    for (const [flag, list] of [["--depends-on", dependsOn], ["--related", related]] as const) {
+      const missing = list.find((x) => !ids.includes(x));
+      if (missing !== undefined) throw new YardhandError(`${flag}: issue ${missing} does not exist.`);
     }
     const status = config.statuses[0] as string;
     const statusDir = join(root, ISSUES_DIR, status);
@@ -178,7 +197,16 @@ export function newIssue(cwd: string, opts: NewOptions): { id: string; path: str
     const file = join(dir, ISSUE_FILE);
     writeFileSync(
       file,
-      renderIssue({ id, kind, parent: opts.parent ?? null, status, assignee: assignee.trim() }),
+      renderIssue({
+        id,
+        kind,
+        parent: opts.parent ?? null,
+        status,
+        assignee: assignee.trim(),
+        priority,
+        dependsOn,
+        related,
+      }),
       { flag: "wx" },
     );
     return { id, path: rel(root, file) };
@@ -389,6 +417,9 @@ function collect(root: string, out: Problem[]): void {
     if (f["released-in"] && !SEMVER_RE.test(f["released-in"])) {
       out.push({ path: here, message: `released-in "${f["released-in"]}" is not valid semver.` });
     }
+    if (f["priority"] && !(PRIORITIES as readonly string[]).includes(f["priority"])) {
+      out.push({ path: here, message: `priority "${f["priority"]}" must be one of: ${PRIORITIES.join(", ")} (or empty).` });
+    }
   }
 
   for (const [id, list] of byId) {
@@ -436,5 +467,49 @@ function collect(root: string, out: Problem[]): void {
     } else if (depth(parent) >= known.depth) {
       out.push({ path: here, message: `parent ${parent} must be at a shallower level than ${known.id}.` });
     }
+  }
+
+  // Link checks: depends-on and related must name existing issues other than the issue itself.
+  const dependsGraph = new Map<string, string[]>();
+  for (const { known, fields } of withFields) {
+    const here = `${known.path}/${ISSUE_FILE}`;
+    for (const key of ["depends-on", "related"] as const) {
+      const ids = splitIdList(fields[key] ?? "");
+      for (const target of ids) {
+        if (!isValidId(target)) {
+          out.push({ path: here, message: `${key} "${target}" is not a valid ID.` });
+        } else if (!byId.has(target)) {
+          out.push({ path: here, message: `${key} ${target} does not exist.` });
+        } else if (target === known.id) {
+          out.push({ path: here, message: `${key} must not list the issue itself (${target}).` });
+        }
+      }
+      if (key === "depends-on") {
+        dependsGraph.set(known.id, ids.filter((t) => t !== known.id && byId.has(t)));
+      }
+    }
+  }
+
+  // A depends-on loop (A needs B, B needs A) can never be finished. Report each loop once.
+  const state = new Map<string, 1 | 2>(); // 1 = on the current path, 2 = done
+  const pathOf = (id: string) => byId.get(id)?.[0]?.path ?? id;
+  const walk = (id: string, trail: string[]): void => {
+    state.set(id, 1);
+    for (const next of dependsGraph.get(id) ?? []) {
+      const st = state.get(next);
+      if (st === 1) {
+        const loop = [...trail.slice(trail.indexOf(next)), next];
+        out.push({
+          path: `${pathOf(next)}/${ISSUE_FILE}`,
+          message: `depends-on loop: ${loop.join(" -> ")}.`,
+        });
+      } else if (st === undefined) {
+        walk(next, [...trail, next]);
+      }
+    }
+    state.set(id, 2);
+  };
+  for (const id of dependsGraph.keys()) {
+    if (!state.has(id)) walk(id, [id]);
   }
 }

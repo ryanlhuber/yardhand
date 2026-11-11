@@ -24,6 +24,7 @@ Nothing is installed into your project. `init` writes plain files only.
 | `yardhand init --yes --statuses a,b,c` | Same, without questions. `--statuses` sets your statuses in order (default `backlog,in-progress,done`). Add `--force` to re-run in a repo that is already set up. |
 | `yardhand new <slug>` | Creates an issue with the next free ID in the first status and prints its ID and path. The slug is lowercase kebab-case, verb first, like `add-auth`. |
 | `yardhand new <slug> --parent 017` | Creates a child of `017` (it gets `017.01`, or the next free number). Also accepts `--kind task\|bug` (default `task`) and `--assignee <name>`. |
+| `yardhand new <slug> --priority high --depends-on 017.02 --related 009` | Sets links when you create the issue: `--priority` is `urgent`, `high`, `medium` or `low`; `--depends-on` lists issues that must be finished first; `--related` lists linked issues that don't block. Both take comma-separated IDs that must already exist. |
 | `yardhand move <id> <status>` | Moves the issue folder to another status and updates `status:` in its `ISSUE.md`. |
 | `yardhand validate` | Checks every issue and reports each problem with its path. Exits `1` if anything is wrong, so it works in CI. |
 | `yardhand --help`, `--version` | Prints the commands, or the installed version. |
@@ -74,6 +75,9 @@ id: 017.01.01
 kind: task
 parent: 017.01
 status: backlog
+priority:
+depends-on:
+related:
 assignee:
 released-in:
 ---
@@ -83,7 +87,13 @@ released-in:
 ## Acceptance criteria
 ```
 
-`id` matches the folder name. `kind` is `task` or `bug`. `parent` is the ID one level up (omit it for level 1) and is the source of truth for rollup, so moving work to a new parent means changing `parent:`, not the folder or ID. `status` matches the folder (`move` keeps them in sync). `assignee` and `released-in` (a version like `1.4.0`) are optional.
+`id` matches the folder name. `kind` is `task` or `bug`. `parent` is the ID one level up (omit it for level 1) and is the source of truth for rollup, so moving work to a new parent means changing `parent:`, not the folder or ID. `status` matches the folder (`move` keeps them in sync). The rest are optional:
+
+- `priority`: `urgent`, `high`, `medium` or `low`. Blank means none.
+- `depends-on`: IDs that must be finished first, like `017.02, 017.03`. Stored on the dependent issue only. `validate` rejects loops.
+- `related`: IDs that are linked but don't block this issue.
+- `assignee`: which model or person owns it.
+- `released-in`: a version like `1.4.0`.
 
 ## Rules
 
