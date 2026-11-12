@@ -25,8 +25,30 @@ export function parentOf(id: string): string | null {
   return parts.length === 1 ? null : parts.slice(0, -1).join(".");
 }
 
-export function folderName(id: string, slug: string): string {
-  return `${id}-${slug}`;
+/** Allowed `priority:` values, 1 highest. An empty value means no priority. */
+export const PRIORITIES = ["1", "2", "3"] as const;
+
+/** Words a slug may not start with: they are the folder-name prefixes. */
+export const RESERVED_PREFIXES = ["p1", "p2", "p3", "bug"] as const;
+
+/** Soft limit for the folder name after the ID, so sidebars do not cut it off. */
+export const NAME_SOFT_LIMIT = 40;
+
+/** True when the slug's first word is a reserved prefix word (`p1-x`, `bug-x`, or just `bug`). */
+export function startsWithReserved(slug: string): boolean {
+  return (RESERVED_PREFIXES as readonly string[]).includes(slug.split("-")[0] as string);
+}
+
+export interface NameParts {
+  priority?: string;
+  bug?: boolean;
+}
+
+/** `<id>-[pN-][bug-]<slug>`. Priority first, then bug. */
+export function folderName(id: string, slug: string, parts: NameParts = {}): string {
+  const p = parts.priority ? `p${parts.priority}-` : "";
+  const b = parts.bug ? "bug-" : "";
+  return `${id}-${p}${b}${slug}`;
 }
 
 /** The ID at the start of a folder name, or null. Used for allocation and lookup. */
@@ -35,14 +57,29 @@ export function leadingId(name: string): string | null {
   return m ? (m[1] as string) : null;
 }
 
-/** Strict parse: valid ID, hyphen, valid slug. */
+/**
+ * Strict parse: valid ID, hyphen, optional `pN-`, optional `bug-`, then a valid slug that does
+ * not itself start with a reserved word. `priority` is "" when there is no priority prefix.
+ */
 export function parseFolderName(
   name: string,
-): { id: string; slug: string } | null {
+): { id: string; priority: string; bug: boolean; slug: string } | null {
   const id = leadingId(name);
   if (!id) return null;
-  const slug = name.slice(id.length + 1);
-  return SLUG_RE.test(slug) ? { id, slug } : null;
+  let rest = name.slice(id.length + 1);
+  let priority = "";
+  const p = /^p([123])-/.exec(rest);
+  if (p) {
+    priority = p[1] as string;
+    rest = rest.slice(p[0].length);
+  }
+  let bug = false;
+  if (rest.startsWith("bug-")) {
+    bug = true;
+    rest = rest.slice(4);
+  }
+  if (!SLUG_RE.test(rest) || startsWithReserved(rest)) return null;
+  return { id, priority, bug, slug: rest };
 }
 
 const pad = (n: number, width: number) => String(n).padStart(width, "0");
@@ -73,9 +110,6 @@ export function nextChild(parent: string, existing: Iterable<string>): string {
   if (max >= 99) throw new YardhandError(`No child IDs left under ${parent} (99 is the maximum).`);
   return `${parent}.${pad(max + 1, 2)}`;
 }
-
-/** Allowed `priority:` values. An empty value means no priority. */
-export const PRIORITIES = ["urgent", "high", "medium", "low"] as const;
 
 /** Split a comma-separated list of IDs, dropping blanks and repeats. */
 export function splitIdList(value: string): string[] {

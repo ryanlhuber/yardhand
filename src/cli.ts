@@ -12,7 +12,7 @@ const HELP = `${TOOL} ${pkg.version}: file-based issue tracking
 Usage:
   ${TOOL} init [--yes] [--statuses a,b,c] [--force]
   ${TOOL} new <slug> [--parent <id>] [--kind task|bug] [--assignee <name>]
-             [--priority urgent|high|medium|low] [--depends-on <ids>] [--related <ids>]
+             [--priority 1|2|3] [--depends-on <ids>] [--related <ids>]
   ${TOOL} move <id> <status>
   ${TOOL} validate
   ${TOOL} --help | --version
@@ -131,7 +131,7 @@ async function main(argv: string[]): Promise<number> {
         },
       });
       const slug = positionals[0];
-      if (!slug || positionals.length > 1) throw new YardhandError(`Usage: ${TOOL} new <slug> [--parent <id>] [--kind task|bug] [--assignee <name>] [--priority <level>] [--depends-on <ids>] [--related <ids>]`);
+      if (!slug || positionals.length > 1) throw new YardhandError(`Usage: ${TOOL} new <slug> [--parent <id>] [--kind task|bug] [--assignee <name>] [--priority <1|2|3>] [--depends-on <ids>] [--related <ids>]`);
       const r = newIssue(cwd, {
         slug,
         parent: values.parent,
@@ -156,13 +156,22 @@ async function main(argv: string[]): Promise<number> {
       // No options and no positionals: anything extra is a mistake, not something to ignore.
       parseArgs({ args: rest, allowPositionals: false, options: {} });
       const problems = validate(cwd);
+      const errors = problems.filter((pr) => !pr.warning);
+      const warnings = problems.filter((pr) => pr.warning);
       if (problems.length === 0) {
         process.stdout.write("OK\n");
         return 0;
       }
       // One write, then let the process end on its own, so a slow reader still gets every line.
-      const lines = problems.map((pr) => `${pr.path}: ${pr.message}`);
-      lines.push("", `${problems.length} problem${problems.length === 1 ? "" : "s"} found.`);
+      const lines = problems.map((pr) => `${pr.path}: ${pr.warning ? "warning: " : ""}${pr.message}`);
+      if (errors.length === 0) {
+        // Warnings alone do not fail validation.
+        process.stderr.write(lines.join("\n") + "\n");
+        process.stdout.write("OK\n");
+        return 0;
+      }
+      const count = `${errors.length} problem${errors.length === 1 ? "" : "s"}`;
+      lines.push("", `${count} found${warnings.length ? `, ${warnings.length} warning${warnings.length === 1 ? "" : "s"}` : ""}.`);
       process.stderr.write(lines.join("\n") + "\n");
       return 1;
     }

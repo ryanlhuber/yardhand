@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { init, moveIssue, newIssue, validate } from "../src/commands.js";
-import { ID_RE, leadingId, nextChild, nextTopLevel, parseFolderName } from "../src/ids.js";
+import { ID_RE, folderName, leadingId, nextChild, nextTopLevel, parseFolderName } from "../src/ids.js";
 import { setField, parseFrontMatter } from "../src/frontmatter.js";
 import { upsertBlock } from "../src/block.js";
 
@@ -28,7 +28,7 @@ test("IDs: matching uses the separator, so 017 never matches 0170", () => {
   assert.equal(leadingId("0170-add-auth"), null);
   assert.equal(leadingId("017.01-add-thing"), "017.01");
   assert.equal(parseFolderName("017-Add"), null);
-  assert.deepEqual(parseFolderName("017.01.01-fix-bug"), { id: "017.01.01", slug: "fix-bug" });
+  assert.deepEqual(parseFolderName("017.01.01-fix-bug"), { id: "017.01.01", priority: "", bug: false, slug: "fix-bug" });
 });
 
 test("IDs: allocation is highest plus one and ignores gaps", () => {
@@ -96,7 +96,7 @@ test("new: allocates IDs, counts done/, and never reuses", () => {
   moveIssue(root, "001", "done");
   assert.equal(newIssue(root, { slug: "add-billing" }).id, "002");
   assert.equal(newIssue(root, { slug: "fix-typo", parent: "000", kind: "bug" }).id, "000.01");
-  assert.match(read(root, "issues/backlog/000.01-fix-typo/ISSUE.md"), /kind: bug/);
+  assert.match(read(root, "issues/backlog/000.01-bug-fix-typo/ISSUE.md"), /kind: bug/);
   assert.deepEqual(validate(root), []);
 });
 
@@ -210,4 +210,27 @@ test("CLI end to end", () => {
   assert.equal(run("--version").stdout.trim(), JSON.parse(readFileSync("package.json", "utf8")).version);
   rmSync(root, { recursive: true, force: true });
   void execFileSync;
+});
+
+test("names: parseFolderName reads priority and bug prefixes in order", () => {
+  assert.deepEqual(parseFolderName("017.01.02-p1-bug-login-redirect-loop"), {
+    id: "017.01.02", priority: "1", bug: true, slug: "login-redirect-loop",
+  });
+  assert.deepEqual(parseFolderName("017-p3-add-auth"), { id: "017", priority: "3", bug: false, slug: "add-auth" });
+  assert.deepEqual(parseFolderName("017-bug-crash-on-start"), { id: "017", priority: "", bug: true, slug: "crash-on-start" });
+  // fix- is not reserved.
+  assert.deepEqual(parseFolderName("017-fix-typo"), { id: "017", priority: "", bug: false, slug: "fix-typo" });
+  // Wrong order, repeats, bare reserved words, and unknown levels are not valid.
+  assert.equal(parseFolderName("017-bug-p1-crash"), null);
+  assert.equal(parseFolderName("017-p1-p2-add-auth"), null);
+  assert.equal(parseFolderName("017-bug-bug-crash"), null);
+  assert.equal(parseFolderName("017-bug"), null);
+  assert.equal(parseFolderName("017-p1"), null);
+  assert.equal(parseFolderName("017-p1-"), null);
+});
+
+test("names: folderName builds the prefixes, priority before bug", () => {
+  assert.equal(folderName("017", "add-auth"), "017-add-auth");
+  assert.equal(folderName("017.01.02", "crash", { priority: "1", bug: true }), "017.01.02-p1-bug-crash");
+  assert.equal(folderName("017", "add-auth", { priority: "2" }), "017-p2-add-auth");
 });

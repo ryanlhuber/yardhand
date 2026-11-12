@@ -21,7 +21,9 @@ import {
 } from "./config.js";
 import { allIds, assertComplete, rel, scan } from "./scan.js";
 import {
+  NAME_SOFT_LIMIT,
   PRIORITIES,
+  RESERVED_PREFIXES,
   SEMVER_RE,
   SLUG_RE,
   depth,
@@ -32,6 +34,7 @@ import {
   parentOf,
   parseFolderName,
   splitIdList,
+  startsWithReserved,
 } from "./ids.js";
 import { parseFrontMatter, setField } from "./frontmatter.js";
 import { renderIssue } from "./template.js";
@@ -146,6 +149,11 @@ export function newIssue(cwd: string, opts: NewOptions): { id: string; path: str
   if (!SLUG_RE.test(opts.slug)) {
     throw new YardhandError(`Slug "${opts.slug}" must be lowercase kebab-case, for example add-auth.`);
   }
+  if (startsWithReserved(opts.slug)) {
+    throw new YardhandError(
+      `Slug "${opts.slug}" starts with a reserved word (${RESERVED_PREFIXES.join(", ")}). Use --priority and --kind bug to add those prefixes.`,
+    );
+  }
   const kind = opts.kind ?? "task";
   if (kind !== "task" && kind !== "bug") throw new YardhandError('--kind must be "task" or "bug".');
   // Checked on the raw value, before any trimming. Control characters (newlines included),
@@ -187,7 +195,7 @@ export function newIssue(cwd: string, opts: NewOptions): { id: string; path: str
     const status = config.statuses[0] as string;
     const statusDir = join(root, ISSUES_DIR, status);
     mkdirSync(statusDir, { recursive: true });
-    const dir = join(statusDir, folderName(id, opts.slug));
+    const dir = join(statusDir, folderName(id, opts.slug, { priority, bug: kind === "bug" }));
     try {
       mkdirSync(dir);
     } catch (err) {
@@ -290,6 +298,8 @@ export function moveIssue(cwd: string, id: string, status: string): { from: stri
 export interface Problem {
   path: string;
   message: string;
+  /** A warning is reported but does not fail `validate`. */
+  warning?: boolean;
 }
 
 export function validate(cwd: string): Problem[] {
@@ -355,7 +365,19 @@ function collect(root: string, out: Problem[]): void {
       out.push({ path, message: "Folder name must start with a valid ID, then a hyphen, then a slug." });
     } else if (!parseFolderName(issue.folder)) {
       // A bad slug is reported, but the issue still takes part in every other check.
-      out.push({ path, message: "Folder name must be <id>-<slug> with a lowercase kebab-case slug." });
+      out.push({
+        path,
+        message:
+          "Folder name must be <id>-[p1|p2|p3-][bug-]<slug>: a lowercase kebab-case slug that does not start with p1, p2, p3 or bug, with the priority prefix before bug-.",
+      });
+    }
+    const parsedName = issue.id ? parseFolderName(issue.folder) : null;
+    if (issue.id && issue.folder.length - issue.id.length - 1 > NAME_SOFT_LIMIT) {
+      out.push({
+        path,
+        warning: true,
+        message: `Folder name after the ID is longer than ${NAME_SOFT_LIMIT} characters, so sidebars may cut it off.`,
+      });
     }
     const known: Known | null = issue.id
       ? { id: issue.id, depth: depth(issue.id), path }
@@ -417,8 +439,29 @@ function collect(root: string, out: Problem[]): void {
     if (f["released-in"] && !SEMVER_RE.test(f["released-in"])) {
       out.push({ path: here, message: `released-in "${f["released-in"]}" is not valid semver.` });
     }
-    if (f["priority"] && !(PRIORITIES as readonly string[]).includes(f["priority"])) {
+    const priorityOk = !f["priority"] || (PRIORITIES as readonly string[]).includes(f["priority"]);
+    if (!priorityOk) {
       out.push({ path: here, message: `priority "${f["priority"]}" must be one of: ${PRIORITIES.join(", ")} (or empty).` });
+    }
+    // The folder prefixes are a visible copy of kind and priority. Only compare when the folder
+    // name parsed and the field is valid, since an invalid field is already reported.
+    if (parsedName) {
+      if (f["kind"] === "bug" && !parsedName.bug) {
+        out.push({ path: here, message: 'kind is "bug" but the folder name has no bug- prefix.' });
+      } else if (f["kind"] === "task" && parsedName.bug) {
+        out.push({ path: here, message: 'folder name has a bug- prefix but kind is not "bug".' });
+      }
+      if (priorityOk) {
+        const want = f["priority"] ?? "";
+        if (want !== parsedName.priority) {
+          out.push({
+            path: here,
+            message: want
+              ? `priority is ${want} but the folder name has ${parsedName.priority ? `p${parsedName.priority}-` : "no priority prefix"} (expected p${want}-).`
+              : `folder name has the p${parsedName.priority}- prefix but priority is empty.`,
+          });
+        }
+      }
     }
   }
 

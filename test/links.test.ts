@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { init, newIssue, validate } from "../src/commands.js";
@@ -39,12 +39,12 @@ test("links: new stores priority, depends-on and related", () => {
   newIssue(root, { slug: "two" }); // 002
   const { path } = newIssue(root, {
     slug: "three",
-    priority: "high",
+    priority: "2",
     dependsOn: ["001", "002"],
     related: ["001"],
   });
   const f = fields(root, path);
-  assert.equal(f["priority"], "high");
+  assert.equal(f["priority"], "2");
   assert.equal(f["depends-on"], "001, 002");
   assert.equal(f["related"], "001");
   assert.deepEqual(validate(root), []);
@@ -77,7 +77,7 @@ test("links: validate reports a bad priority", () => {
   const root = repo();
   const { path } = newIssue(root, { slug: "one" });
   writeFileSync(join(root, path), read(root, path).replace("priority:", "priority: asap"));
-  assert.match(messages(root), /priority "asap" must be one of: urgent, high, medium, low/);
+  assert.match(messages(root), /priority "asap" must be one of: 1, 2, 3/);
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -139,13 +139,89 @@ test("links: CLI new accepts --priority, --depends-on and --related", () => {
   assert.equal(run("init", "--yes").status, 0);
   assert.equal(run("new", "add-auth").status, 0); // 001
   assert.equal(run("new", "add-login").status, 0); // 002
-  const r = run("new", "add-ui", "--priority", "urgent", "--depends-on", "001, 002", "--related", "001");
+  const r = run("new", "add-ui", "--priority", "1", "--depends-on", "001, 002", "--related", "001");
   assert.equal(r.status, 0, r.stderr);
   const f = fields(root, r.stdout.trim().split(" ")[1]!);
-  assert.equal(f["priority"], "urgent");
+  assert.equal(f["priority"], "1");
   assert.equal(f["depends-on"], "001, 002");
   assert.equal(f["related"], "001");
   assert.equal(run("new", "bad", "--priority", "asap").status, 1);
   assert.equal(run("validate").stdout.trim(), "OK");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("prefixes: new adds p and bug prefixes to the folder name", () => {
+  const root = repo();
+  const a = newIssue(root, { slug: "add-auth", priority: "1" });
+  assert.equal(a.path, "issues/backlog/001-p1-add-auth/ISSUE.md");
+  const b = newIssue(root, { slug: "login-loop", parent: "001", kind: "bug", priority: "2" });
+  assert.equal(b.path, "issues/backlog/001.01-p2-bug-login-loop/ISSUE.md");
+  const c = newIssue(root, { slug: "crash", kind: "bug" });
+  assert.equal(c.path, "issues/backlog/002-bug-crash/ISSUE.md");
+  assert.deepEqual(validate(root), []);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("prefixes: new rejects a slug that starts with a reserved word", () => {
+  const root = repo();
+  for (const slug of ["bug-crash", "p1-add-auth", "p3-x", "bug"]) {
+    assert.throws(() => newIssue(root, { slug }), /reserved word/, slug);
+  }
+  assert.doesNotThrow(() => newIssue(root, { slug: "fix-typo" }));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("prefixes: validate reports a prefix that disagrees with front matter", () => {
+  const root = repo();
+  const a = newIssue(root, { slug: "add-auth", priority: "1" });
+  writeFileSync(join(root, a.path), read(root, a.path).replace("priority: 1", "priority:"));
+  assert.match(messages(root), /p1- prefix but priority is empty/);
+  writeFileSync(join(root, a.path), read(root, a.path).replace("priority:", "priority: 3"));
+  assert.match(messages(root), /priority is 3 but the folder name has p1- \(expected p3-\)/);
+  const b = newIssue(root, { slug: "crash", kind: "bug" });
+  writeFileSync(join(root, b.path), read(root, b.path).replace("kind: bug", "kind: task"));
+  assert.match(messages(root), /bug- prefix but kind is not "bug"/);
+  writeFileSync(join(root, b.path), read(root, b.path).replace("kind: task", "kind: bug"));
+  assert.doesNotMatch(messages(root), /bug-/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("prefixes: a folder with a missing prefix for its kind or priority is reported", () => {
+  const root = repo();
+  const a = newIssue(root, { slug: "crash", kind: "bug", priority: "2" });
+  const dir = join(root, "issues/backlog");
+  renameSync(join(dir, "001-p2-bug-crash"), join(dir, "001-crash"));
+  void a;
+  const m = messages(root);
+  assert.match(m, /kind is "bug" but the folder name has no bug- prefix/);
+  assert.match(m, /priority is 2 but the folder name has no priority prefix/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("prefixes: a long folder name is a warning, not a failure", () => {
+  const root = repo();
+  newIssue(root, { slug: "add-a-very-long-descriptive-name-for-this-issue" });
+  const problems = validate(root);
+  assert.equal(problems.length, 1);
+  assert.equal(problems[0]!.warning, true);
+  assert.match(problems[0]!.message, /longer than 40 characters/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("prefixes: CLI validate exits 0 on warnings only and 1 on a mismatch", () => {
+  const bin = resolve("dist/cli.js");
+  const root = mkdtempSync(join(tmpdir(), "yardhand-prefix-cli-"));
+  const run = (...args: string[]) => spawnSync("node", [bin, ...args], { cwd: root, encoding: "utf8" });
+  assert.equal(run("init", "--yes").status, 0);
+  assert.equal(run("new", "add-a-very-long-descriptive-name-for-this-issue").status, 0);
+  const warn = run("validate");
+  assert.equal(warn.status, 0);
+  assert.match(warn.stderr, /warning: Folder name after the ID is longer than 40/);
+  assert.equal(warn.stdout.trim(), "OK");
+  const r = run("new", "crash", "--kind", "bug", "--priority", "1");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /002-p1-bug-crash/);
+  renameSync(join(root, "issues/backlog/002-p1-bug-crash"), join(root, "issues/backlog/002-crash"));
+  assert.equal(run("validate").status, 1);
   rmSync(root, { recursive: true, force: true });
 });
