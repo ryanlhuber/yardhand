@@ -1,6 +1,8 @@
+import type { Kind } from "./ids.js";
+
 export interface NewIssueFields {
   id: string;
-  kind: "task" | "bug";
+  kind: Kind;
   parent: string | null;
   status: string;
   assignee: string;
@@ -22,8 +24,10 @@ export function renderIssue(f: NewIssueFields): string {
     "---",
     "",
     "## Description",
+    "<!-- What and why. A buildable unit should fit one model session. -->",
     "",
     "## Acceptance criteria",
+    "<!-- Checkable outcomes, one per line. -->",
     "",
   );
   return lines.join("\n");

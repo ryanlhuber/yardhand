@@ -1,6 +1,6 @@
 import { lstatSync, readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { ISSUES_DIR, ISSUE_FILE } from "./names.js";
+import { ISSUES_DIR, ISSUE_FILE, RELEASES_DIR } from "./names.js";
 import { YardhandError } from "./errors.js";
 import { leadingId } from "./ids.js";
 import type { Config } from "./config.js";
@@ -86,7 +86,7 @@ export function scan(root: string, config: Config): Scan {
   }
   for (const entry of top) {
     // Dot entries (such as the lock) are tool internals, not statuses.
-    if (entry.startsWith(".") || config.statuses.includes(entry)) continue;
+    if (entry.startsWith(".") || config.statuses.includes(entry) || entry === RELEASES_DIR) continue;
     const kind = kindOf(join(base, entry));
     if (kind === "link") out.symlinks.push(entry);
     if (kind === "error") out.unreadable.push(entry);

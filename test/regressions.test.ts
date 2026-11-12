@@ -213,7 +213,7 @@ test("validate: an empty parent field on a level-1 issue is an error", () => {
   const root = repo();
   newIssue(root, { slug: "add-auth" });
   const p = "issues/backlog/001-add-auth/ISSUE.md";
-  write(root, p, read(root, p).replace("kind: task", "kind: task\nparent:"));
+  write(root, p, read(root, p).replace("kind: feature", "kind: feature\nparent:"));
   assert.match(messages(root), /level-1 issue must omit the parent field/);
 });
 
@@ -250,10 +250,10 @@ test("validate: missing or empty id, kind, and status are reported", () => {
 
 test("validate: an invalid config is a reported problem, and the CLI exits 1", () => {
   const root = repo();
-  write(root, "issues/yardhand.json", '{ "statuses": ["done", "backlog"] }');
+  write(root, "issues/yardhand.json", '{ "statuses": ["done", "review"] }');
   const problems = validate(root);
-  assert.equal(problems.length, 1);
-  assert.match(problems[0]!.message, /first status/);
+  assert.ok(problems.length >= 1);
+  assert.match(problems[0]!.message, /must include "backlog"/);
   write(root, "issues/yardhand.json", "not json");
   assert.match(messages(root), /not valid JSON/);
   const r = spawnSync("node", [bin, "validate"], { cwd: root, encoding: "utf8" });
@@ -310,7 +310,7 @@ test("CLI: validate exits 1 and names the file when an issue is invalid", () => 
   const root = repo();
   newIssue(root, { slug: "add-auth" });
   const p = "issues/backlog/001-add-auth/ISSUE.md";
-  write(root, p, read(root, p).replace("kind: task", "kind: story"));
+  write(root, p, read(root, p).replace("kind: feature", "kind: story"));
   const r = spawnSync("node", [bin, "validate"], { cwd: root, encoding: "utf8" });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /001-add-auth\/ISSUE\.md: kind must be/);

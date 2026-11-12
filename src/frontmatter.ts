@@ -46,9 +46,20 @@ export function setField(text: string, key: string, value: string): string {
     if (m) {
       const comment = /\s+#.*$/.exec(m[1] as string)?.[0] ?? "";
       const eol = line.endsWith("\r") ? "\r" : "";
-      lines[i] = `${key}: ${value}${comment}${eol}`;
+      lines[i] = `${key}:${value ? " " + value : ""}${comment}${eol}`;
       return lines.join("\n");
     }
   }
   throw new YardhandError(`Field "${key}" not found in the front matter.`);
+}
+
+/** Like setField, but adds the field just before the closing `---` when the file does not have it yet. */
+export function upsertField(text: string, key: string, value: string): string {
+  const fm = parseFrontMatter(text);
+  if (!fm) throw new YardhandError("The issue file has no valid front matter.");
+  if (fm.fields[key] !== undefined) return setField(text, key, value);
+  const lines = text.split("\n");
+  const eol = (lines[fm.end] as string).endsWith("\r") ? "\r" : "";
+  lines.splice(fm.end, 0, `${key}:${value ? " " + value : ""}${eol}`);
+  return lines.join("\n");
 }

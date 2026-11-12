@@ -194,7 +194,7 @@ test("validate: a folder with no recognizable ID still gets every other check", 
   );
   const msgs = messages(root);
   assert.match(msgs, /not-an-id: Folder name must start with a valid ID/);
-  assert.match(msgs, /kind must be "task" or "bug"/);
+  assert.match(msgs, /kind must be "feature", "task" or "bug"/);
   assert.match(msgs, /Field "status" appears more than once/);
   assert.match(msgs, /released-in "01\.2\.3" is not valid semver/);
 });
@@ -215,7 +215,7 @@ test("front matter: keys named like Object.prototype members are ordinary keys",
   const root = repo();
   newIssue(root, { slug: "add-auth" });
   const p = "issues/backlog/001-add-auth/ISSUE.md";
-  write(root, p, read(root, p).replace("kind: task", "kind: task\nconstructor: agent\ntoString: x\nhasOwnProperty: y"));
+  write(root, p, read(root, p).replace("kind: feature", "kind: feature\nconstructor: agent\ntoString: x\nhasOwnProperty: y"));
   assert.deepEqual(validate(root), []);
   assert.match(messages(root) + "x", /^x$/);
   write(root, p, read(root, p).replace("constructor: agent", "constructor: agent\nconstructor: again"));

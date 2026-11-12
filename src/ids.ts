@@ -25,8 +25,32 @@ export function parentOf(id: string): string | null {
   return parts.length === 1 ? null : parts.slice(0, -1).join(".");
 }
 
-export function folderName(id: string, slug: string): string {
-  return `${id}-${slug}`;
+/** The only reserved folder prefix. It follows the ID and marks `kind: bug`. */
+export const BUG_PREFIX = "bug-";
+
+export const KINDS = ["feature", "task", "bug"] as const;
+export type Kind = (typeof KINDS)[number];
+
+/** Default kind by depth: level 1 is a feature, deeper levels are tasks. */
+export const defaultKind = (id: string): Kind => (depth(id) === 1 ? "feature" : "task");
+
+/**
+ * Turn what someone typed into a name: trim, lowercase, and turn runs of spaces and
+ * underscores into one dash. "Review 1" becomes "review-1". Validation happens after.
+ */
+export function normalizeName(input: string): string {
+  return input.trim().toLowerCase().replace(/[\s_]+/g, "-");
+}
+
+export function folderName(id: string, slug: string, bug = false): string {
+  return `${id}-${bug ? BUG_PREFIX : ""}${slug}`;
+}
+
+/** Split the text after "<id>-" into the bug marker and the slug. */
+export function splitPrefix(rest: string): { bug: boolean; slug: string } {
+  return rest.startsWith(BUG_PREFIX)
+    ? { bug: true, slug: rest.slice(BUG_PREFIX.length) }
+    : { bug: false, slug: rest };
 }
 
 /** The ID at the start of a folder name, or null. Used for allocation and lookup. */
@@ -38,11 +62,13 @@ export function leadingId(name: string): string | null {
 /** Strict parse: valid ID, hyphen, valid slug. */
 export function parseFolderName(
   name: string,
-): { id: string; slug: string } | null {
+): { id: string; slug: string; bug: boolean } | null {
   const id = leadingId(name);
   if (!id) return null;
-  const slug = name.slice(id.length + 1);
-  return SLUG_RE.test(slug) ? { id, slug } : null;
+  const { bug, slug } = splitPrefix(name.slice(id.length + 1));
+  // A second "bug-" would be a reserved prefix used as part of the slug.
+  if (!SLUG_RE.test(slug) || slug.startsWith(BUG_PREFIX)) return null;
+  return { id, slug, bug };
 }
 
 const pad = (n: number, width: number) => String(n).padStart(width, "0");
@@ -74,8 +100,42 @@ export function nextChild(parent: string, existing: Iterable<string>): string {
   return `${parent}.${pad(max + 1, 2)}`;
 }
 
-/** Allowed `priority:` values. An empty value means no priority. */
+/** Allowed `priority:` values, most urgent first. An empty value means no priority. */
 export const PRIORITIES = ["urgent", "high", "medium", "low"] as const;
+/** Sort rank: urgent is 0, no priority sorts last. */
+export const priorityRank = (p: string): number => {
+  const i = (PRIORITIES as readonly string[]).indexOf(p);
+  return i === -1 ? PRIORITIES.length : i;
+};
+
+/** Compare two semver strings by precedence (build metadata ignored). Returns <0, 0, or >0. */
+export function compareSemver(a: string, b: string): number {
+  const parse = (v: string) => {
+    const [core, pre] = (v.split("+")[0] as string).split("-", 2) as [string, string | undefined];
+    return { nums: core.split(".").map(Number), pre: pre === undefined ? null : pre.split(".") };
+  };
+  const x = parse(a);
+  const y = parse(b);
+  for (let i = 0; i < 3; i++) {
+    const d = (x.nums[i] as number) - (y.nums[i] as number);
+    if (d !== 0) return d;
+  }
+  if (x.pre === null && y.pre === null) return 0;
+  if (x.pre === null) return 1;
+  if (y.pre === null) return -1;
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const p = x.pre[i];
+    const q = y.pre[i];
+    if (p === undefined) return -1;
+    if (q === undefined) return 1;
+    const pn = /^\d+$/.test(p);
+    const qn = /^\d+$/.test(q);
+    if (pn && qn && Number(p) !== Number(q)) return Number(p) - Number(q);
+    if (pn !== qn) return pn ? -1 : 1;
+    if (!pn && p !== q) return p < q ? -1 : 1;
+  }
+  return 0;
+}
 
 /** Split a comma-separated list of IDs, dropping blanks and repeats. */
 export function splitIdList(value: string): string[] {
