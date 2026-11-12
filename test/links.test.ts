@@ -141,7 +141,7 @@ test("links: CLI new accepts --priority, --depends-on and --related", () => {
   assert.equal(run("new", "add-login").status, 0); // 002
   const r = run("new", "add-ui", "--priority", "urgent", "--depends-on", "001, 002", "--related", "001");
   assert.equal(r.status, 0, r.stderr);
-  const f = fields(root, r.stdout.trim().split(" ")[1]!);
+  const f = fields(root, r.stdout.trim().split(/\s+/)[1]!);
   assert.equal(f["priority"], "urgent");
   assert.equal(f["depends-on"], "001, 002");
   assert.equal(f["related"], "001");

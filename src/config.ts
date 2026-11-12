@@ -1,6 +1,6 @@
 import { lstatSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { CONFIG_FILE, ISSUES_DIR, TOOL } from "./names.js";
+import { CONFIG_FILE, ISSUES_DIR, RELEASES_DIR, TOOL } from "./names.js";
 import { YardhandError, NotInitializedError } from "./errors.js";
 import { STATUS_RE } from "./ids.js";
 
@@ -18,8 +18,10 @@ export function statusProblems(statuses: unknown): string[] {
   }
   const list = statuses as string[];
   if (list.length < 2) out.push('"statuses" needs at least "backlog" and "done".');
-  if (list[0] !== "backlog") out.push('The first status must be "backlog".');
-  if (list[list.length - 1] !== "done") out.push('The last status must be "done".');
+  if (list.includes(RELEASES_DIR)) out.push(`"${RELEASES_DIR}" is reserved for release files and cannot be a status.`);
+  for (const required of ["backlog", "done"]) {
+    if (!list.includes(required)) out.push(`"statuses" must include "${required}".`);
+  }
   const seen = new Set<string>();
   for (const s of list) {
     if (!STATUS_RE.test(s)) out.push(`Status "${s}" must be lowercase kebab-case.`);

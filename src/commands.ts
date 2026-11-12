@@ -8,7 +8,6 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { YardhandError, NotInitializedError } from "./errors.js";
 import { CONFIG_FILE, ISSUES_DIR, ISSUE_FILE, TOOL } from "./names.js";
@@ -21,37 +20,34 @@ import {
 } from "./config.js";
 import { allIds, assertComplete, rel, scan } from "./scan.js";
 import {
+  BUG_PREFIX,
+  KINDS,
   PRIORITIES,
   SEMVER_RE,
   SLUG_RE,
+  type Kind,
+  defaultKind,
   depth,
   folderName,
   isValidId,
   nextChild,
   nextTopLevel,
+  normalizeName,
   parentOf,
   parseFolderName,
   splitIdList,
+  splitPrefix,
 } from "./ids.js";
 import { parseFrontMatter, setField } from "./frontmatter.js";
+import { commitIssue, TMP_RE, tryRemove } from "./commit.js";
+import { readIssues, parentField } from "./issues.js";
+import { buildRoadmap } from "./roadmap.js";
+import { ROADMAP_FILE } from "./names.js";
 import { renderIssue } from "./template.js";
 import { applyBlocks, planBlocks, renderBlock } from "./block.js";
 import { withLock } from "./lock.js";
 
 const errCode = (err: unknown) => (err as NodeJS.ErrnoException).code ?? "error";
-// Temp files for a status rewrite: a random name, created exclusively, so an existing file,
-// hard link, or symlink at a guessable path can never be written through.
-const tmpName = () => `.${ISSUE_FILE}.${randomBytes(6).toString("hex")}.tmp`;
-const TMP_RE = new RegExp(`^\\.${ISSUE_FILE.replace(/\./g, "\\.")}\\..+\\.tmp$`);
-
-/** Cleanup must never hide the error that caused it. */
-function tryRemove(path: string): void {
-  try {
-    rmSync(path, { recursive: true, force: true });
-  } catch {
-    // ignored on purpose
-  }
-}
 // Control characters (C0, DEL, and C1), Unicode line/paragraph separators, and "#" could change how the file parses.
 const UNSAFE_ASSIGNEE = new RegExp("[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029#]");
 
@@ -110,16 +106,17 @@ export function init(
       const keep = join(dir, ".gitkeep");
       if (!existsSync(keep)) writeFileSync(keep, "");
     }
-    // 000 is the catch-all parent for maintenance and bugs with no clear home. Created with
-    // exclusive operations, so an existing issue can never be overwritten.
+    // 000 is the catch-all parent for maintenance and bugs with no clear home. It always starts
+    // in backlog, whichever status comes first. Created with exclusive operations, so an
+    // existing issue can never be overwritten.
     if (!hasCatchAll) {
-      const first = statuses[0] as string;
+      const first = "backlog";
       const dir = join(root, ISSUES_DIR, first, folderName("000", "maintain-repo"));
       try {
         mkdirSync(dir);
         writeFileSync(
           join(dir, ISSUE_FILE),
-          renderIssue({ id: "000", kind: "task", parent: null, status: first, assignee: "" }),
+          renderIssue({ id: "000", kind: defaultKind("000"), parent: null, status: first, assignee: "" }),
           { flag: "wx" },
         );
       } catch (err) {
@@ -133,21 +130,47 @@ export function init(
 export interface NewOptions {
   slug: string;
   parent?: string;
-  kind?: "task" | "bug";
+  kind?: string;
   assignee?: string;
   priority?: string;
   dependsOn?: string[];
   related?: string[];
 }
 
-export function newIssue(cwd: string, opts: NewOptions): { id: string; path: string } {
+export interface NewResult {
+  id: string;
+  path: string;
+  kind: Kind;
+  priority: string;
+  parent: string | null;
+  status: string;
+  /** Things the tool changed or converted for the caller, to print. */
+  notes: string[];
+}
+
+export function newIssue(cwd: string, opts: NewOptions): NewResult {
   const root = findRoot(cwd);
   const config = loadConfig(root);
-  if (!SLUG_RE.test(opts.slug)) {
+  const notes: string[] = [];
+
+  // Normalize what was typed, then turn a leading "bug-" into --kind bug.
+  let slug = normalizeName(opts.slug);
+  if (slug !== opts.slug) notes.push(`Slug normalized: "${opts.slug}" -> ${slug}`);
+  let kindOpt = opts.kind === undefined ? undefined : opts.kind.trim().toLowerCase();
+  if (kindOpt !== undefined && !(KINDS as readonly string[]).includes(kindOpt)) {
+    throw new YardhandError(`--kind must be one of: ${KINDS.join(", ")}.`);
+  }
+  if (slug.startsWith(BUG_PREFIX)) {
+    if (kindOpt !== undefined && kindOpt !== "bug") {
+      throw new YardhandError(`The slug starts with "${BUG_PREFIX}" but --kind is ${kindOpt}. Use --kind bug, or drop the prefix.`);
+    }
+    slug = slug.slice(BUG_PREFIX.length);
+    kindOpt = "bug";
+    notes.push(`Converted the "${BUG_PREFIX}" prefix to --kind bug.`);
+  }
+  if (!SLUG_RE.test(slug) || slug.startsWith(BUG_PREFIX)) {
     throw new YardhandError(`Slug "${opts.slug}" must be lowercase kebab-case, for example add-auth.`);
   }
-  const kind = opts.kind ?? "task";
-  if (kind !== "task" && kind !== "bug") throw new YardhandError('--kind must be "task" or "bug".');
   // Checked on the raw value, before any trimming. Control characters (newlines included),
   // Unicode line and paragraph separators, and "#" could all change how the file parses.
   const assignee = opts.assignee ?? "";
@@ -157,7 +180,7 @@ export function newIssue(cwd: string, opts: NewOptions): { id: string; path: str
   if (opts.parent !== undefined && !isValidId(opts.parent)) {
     throw new YardhandError(`"${opts.parent}" is not a valid ID.`);
   }
-  const priority = opts.priority ?? "";
+  const priority = (opts.priority ?? "").trim().toLowerCase();
   if (priority !== "" && !(PRIORITIES as readonly string[]).includes(priority)) {
     throw new YardhandError(`--priority must be one of: ${PRIORITIES.join(", ")}.`);
   }
@@ -184,10 +207,11 @@ export function newIssue(cwd: string, opts: NewOptions): { id: string; path: str
       const missing = list.find((x) => !ids.includes(x));
       if (missing !== undefined) throw new YardhandError(`${flag}: issue ${missing} does not exist.`);
     }
+    const kind = (kindOpt ?? defaultKind(id)) as Kind;
     const status = config.statuses[0] as string;
     const statusDir = join(root, ISSUES_DIR, status);
     mkdirSync(statusDir, { recursive: true });
-    const dir = join(statusDir, folderName(id, opts.slug));
+    const dir = join(statusDir, folderName(id, slug, kind === "bug"));
     try {
       mkdirSync(dir);
     } catch (err) {
@@ -209,16 +233,30 @@ export function newIssue(cwd: string, opts: NewOptions): { id: string; path: str
       }),
       { flag: "wx" },
     );
-    return { id, path: rel(root, file) };
+    return { id, path: rel(root, file), kind, priority, parent: opts.parent ?? null, status, notes };
   });
 }
 
-export function moveIssue(cwd: string, id: string, status: string): { from: string; to: string } {
+export interface MoveResult {
+  from: string;
+  to: string;
+  status: string;
+  /** True when the issue was already in that status and nothing changed. */
+  unchanged: boolean;
+  /** Direct children (by `parent:`) that were not moved. */
+  children: string[];
+  notes: string[];
+}
+
+export function moveIssue(cwd: string, id: string, statusInput: string): MoveResult {
   const root = findRoot(cwd);
   const config = loadConfig(root);
+  const status = normalizeName(statusInput);
+  const notes: string[] = [];
   if (!config.statuses.includes(status)) {
-    throw new YardhandError(`Unknown status "${status}". Statuses: ${config.statuses.join(", ")}.`);
+    throw new YardhandError(`Unknown status "${statusInput}". Statuses: ${config.statuses.join(", ")}.`);
   }
+  if (status !== statusInput) notes.push(`Status normalized: "${statusInput}" -> ${status}`);
   if (!isValidId(id)) throw new YardhandError(`"${id}" is not a valid ID.`);
 
   return withLock(root, () => {
@@ -230,7 +268,13 @@ export function moveIssue(cwd: string, id: string, status: string): { from: stri
       throw new YardhandError(`Issue ${id} exists in more than one place; run ${TOOL} validate and fix the duplicate first.`);
     }
     const issue = matches[0]!;
-    if (issue.status === status) throw new YardhandError(`Issue ${id} is already in ${status}.`);
+    const children = readIssues(root, s)
+      .filter((i) => i.id && parentField(i) === id)
+      .map((i) => i.id as string)
+      .sort();
+    if (issue.status === status) {
+      return { from: rel(root, issue.dir), to: rel(root, issue.dir), status, unchanged: true, children: [], notes };
+    }
     const statusDir = join(root, ISSUES_DIR, status);
     const dest = join(statusDir, issue.folder);
     if (existsSync(dest)) throw new YardhandError(`${rel(root, dest)} already exists.`);
@@ -248,96 +292,76 @@ export function moveIssue(cwd: string, id: string, status: string): { from: stri
       throw new YardhandError(`Cannot read ${rel(root, file)} (${errCode(err)}).`);
     }
     const updated = setField(text, "status", status);
-
-    // The new status is written to a temp file first, so a failed or partial write can only
-    // damage the temp file. Then: move the folder, and rename the temp file over ISSUE.md
-    // (an atomic replace). If that last step fails, move the folder back. The original
-    // ISSUE.md is untouched until the final rename, so the folder and the status field
-    // cannot disagree, short of the move-back itself failing, which is reported. A crash
-    // between the two renames leaves a mismatch and a temp file, both of which validate reports.
-    const name = tmpName();
-    const tmp = join(issue.dir, name);
-    try {
-      writeFileSync(tmp, updated, { flag: "wx" });
-    } catch (err) {
-      tryRemove(tmp);
-      throw new YardhandError(`Could not write the new status (${errCode(err)}). Nothing was moved.`);
-    }
-    try {
-      mkdirSync(statusDir, { recursive: true });
-      renameSync(issue.dir, dest);
-    } catch (err) {
-      tryRemove(tmp);
-      throw new YardhandError(`Could not move ${rel(root, issue.dir)} (${errCode(err)}). Nothing was moved.`);
-    }
-    try {
-      renameSync(join(dest, name), join(dest, ISSUE_FILE));
-    } catch (err) {
-      try {
-        renameSync(dest, issue.dir);
-      } catch {
-        throw new YardhandError(
-          `${rel(root, dest)} was moved to ${status} but its status field still says ${issue.status}, and it could not be moved back (${errCode(err)}). Move it back by hand, or fix the field.`,
-        );
-      }
-      tryRemove(join(issue.dir, name));
-      throw new YardhandError(`Could not update ${ISSUE_FILE} (${errCode(err)}). Nothing was moved.`);
-    }
-    return { from: rel(root, issue.dir), to: rel(root, dest) };
+    commitIssue(root, issue, updated, {
+      destDir: dest,
+      what: "the new status",
+      stateHint: `Move it back by hand, or fix the field (it should say ${status}).`,
+    });
+    return { from: rel(root, issue.dir), to: rel(root, dest), status, unchanged: false, children, notes };
   });
 }
 
 export interface Problem {
   path: string;
+  /** Short name of the rule that failed, for `validate --json`. */
+  rule: string;
   message: string;
 }
 
-export function validate(cwd: string): Problem[] {
-  const out: Problem[] = [];
+export interface CheckResult {
+  errors: Problem[];
+  warnings: Problem[];
+}
+
+/** Slug length that triggers a warning (not counting a `bug-` prefix). */
+export const SOFT_SLUG_LIMIT = 40;
+
+/** Errors and warnings for the whole issues/ tree. */
+export function check(cwd: string): CheckResult {
+  const result: CheckResult = { errors: [], warnings: [] };
   try {
-    collect(findRoot(cwd), out);
+    collect(findRoot(cwd), result);
   } catch (err) {
     // Root discovery and filesystem surprises are findings too, and must not discard what was
     // already found.
-    out.push({
+    result.errors.push({
       path: ISSUES_DIR,
+      rule: "root",
       message:
         err instanceof YardhandError
           ? err.message
           : `Could not finish checking (${errCode(err)}${err instanceof Error ? `: ${err.message}` : ""}).`,
     });
   }
-  return out;
+  return result;
 }
 
-function collect(root: string, out: Problem[]): void {
+/** Errors only, for callers that do not care about warnings. */
+export function validate(cwd: string): Problem[] {
+  return check(cwd).errors;
+}
+
+function collect(root: string, result: CheckResult): void {
+  const out = result.errors;
+  const bad = (path: string, rule: string, message: string) => out.push({ path, rule, message });
   let config: Config;
   try {
     config = loadConfig(root);
   } catch (err) {
-    out.push({
-      path: `${ISSUES_DIR}/${CONFIG_FILE}`,
-      message: err instanceof YardhandError ? err.message : `${CONFIG_FILE} cannot be read (${errCode(err)}).`,
-    });
+    bad(
+      `${ISSUES_DIR}/${CONFIG_FILE}`,
+      "config",
+      err instanceof YardhandError ? err.message : `${CONFIG_FILE} cannot be read (${errCode(err)}).`,
+    );
     return;
   }
   const s = scan(root, config);
 
-  for (const d of s.unknownDirs) {
-    out.push({ path: `${ISSUES_DIR}/${d}`, message: `Folder is not a status in ${CONFIG_FILE}.` });
-  }
-  for (const st of s.missingStatuses) {
-    out.push({ path: `${ISSUES_DIR}/${st}`, message: "Status folder is missing." });
-  }
-  for (const st of s.badStatusPaths) {
-    out.push({ path: `${ISSUES_DIR}/${st}`, message: "Status path is not a readable folder." });
-  }
-  for (const link of s.symlinks) {
-    out.push({ path: `${ISSUES_DIR}/${link}`, message: "Symlinks are not supported." });
-  }
-  for (const u of s.unreadable) {
-    out.push({ path: `${ISSUES_DIR}/${u}`, message: "Cannot be inspected (permissions or I/O error)." });
-  }
+  for (const d of s.unknownDirs) bad(`${ISSUES_DIR}/${d}`, "unknown-folder", `Folder is not a status in ${CONFIG_FILE}.`);
+  for (const st of s.missingStatuses) bad(`${ISSUES_DIR}/${st}`, "status-folder", "Status folder is missing.");
+  for (const st of s.badStatusPaths) bad(`${ISSUES_DIR}/${st}`, "status-folder", "Status path is not a readable folder.");
+  for (const link of s.symlinks) bad(`${ISSUES_DIR}/${link}`, "symlink", "Symlinks are not supported.");
+  for (const u of s.unreadable) bad(`${ISSUES_DIR}/${u}`, "unreadable", "Cannot be inspected (permissions or I/O error).");
 
   interface Known {
     id: string;
@@ -351,25 +375,35 @@ function collect(root: string, out: Problem[]): void {
 
   for (const issue of s.issues) {
     const path = rel(root, issue.dir);
+    const { bug: hasBugPrefix, slug } = splitPrefix(issue.id ? issue.folder.slice(issue.id.length + 1) : issue.folder);
     if (!issue.id) {
-      out.push({ path, message: "Folder name must start with a valid ID, then a hyphen, then a slug." });
+      bad(path, "folder-name", "Folder name must start with a valid ID, then a hyphen, then a slug.");
     } else if (!parseFolderName(issue.folder)) {
       // A bad slug is reported, but the issue still takes part in every other check.
-      out.push({ path, message: "Folder name must be <id>-<slug> with a lowercase kebab-case slug." });
+      if (hasBugPrefix && slug.startsWith(BUG_PREFIX)) {
+        bad(path, "reserved-prefix", `"${BUG_PREFIX}" is reserved: it may appear only once, right after the ID.`);
+      } else {
+        bad(path, "folder-name", "Folder name must be <id>-<slug> with a lowercase kebab-case slug.");
+      }
+    } else if (slug.length > SOFT_SLUG_LIMIT) {
+      result.warnings.push({
+        path,
+        rule: "slug-length",
+        message: `Slug is ${slug.length} characters; the soft limit is ${SOFT_SLUG_LIMIT}.`,
+      });
     }
-    const known: Known | null = issue.id
-      ? { id: issue.id, depth: depth(issue.id), path }
-      : null;
+    const known: Known | null = issue.id ? { id: issue.id, depth: depth(issue.id), path } : null;
     if (known) byId.set(known.id, [...(byId.get(known.id) ?? []), known]);
 
     // A move that was interrupted between its two renames leaves a temp file behind.
     try {
       for (const name of readdirSync(issue.dir)) {
         if (TMP_RE.test(name)) {
-          out.push({
-            path: `${path}/${name}`,
-            message: `Leftover temp file from an interrupted move. The status field may not match the folder: check ${ISSUE_FILE}, then delete the temp file (or rename it over ${ISSUE_FILE} to finish the move).`,
-          });
+          bad(
+            `${path}/${name}`,
+            "temp-file",
+            `Leftover temp file from an interrupted change. The ${ISSUE_FILE} fields may not match the folder: check ${ISSUE_FILE}, then delete the temp file (or rename it over ${ISSUE_FILE} to finish the change).`,
+          );
         }
       }
     } catch {
@@ -384,50 +418,51 @@ function collect(root: string, out: Problem[]): void {
       if (lstatSync(file).isSymbolicLink()) continue;
       text = readFileSync(file, "utf8");
     } catch (err) {
-      out.push({
+      bad(
         path,
-        message: errCode(err) === "ENOENT" ? `${ISSUE_FILE} is missing.` : `${ISSUE_FILE} cannot be read (${errCode(err)}).`,
-      });
+        "issue-file",
+        errCode(err) === "ENOENT" ? `${ISSUE_FILE} is missing.` : `${ISSUE_FILE} cannot be read (${errCode(err)}).`,
+      );
       continue;
     }
     const fm = parseFrontMatter(text);
     if (!fm) {
-      out.push({ path: here, message: "Front matter is missing or malformed." });
+      bad(here, "front-matter", "Front matter is missing or malformed.");
       continue;
     }
     const f = fm.fields;
     if (known) withFields.push({ known, fields: f });
     else idless.push({ path, fields: f });
 
-    for (const key of fm.duplicates) {
-      out.push({ path: here, message: `Field "${key}" appears more than once.` });
-    }
+    for (const key of fm.duplicates) bad(here, "duplicate-key", `Field "${key}" appears more than once.`);
     if (issue.id && f["id"] !== issue.id) {
-      out.push({ path: here, message: `id "${f["id"] ?? ""}" does not match the folder ID ${issue.id}.` });
+      bad(here, "id", `id "${f["id"] ?? ""}" does not match the folder ID ${issue.id}.`);
     }
     if (f["status"] !== issue.status) {
-      out.push({
-        path: here,
-        message: `status "${f["status"] ?? ""}" does not match its folder (${issue.status}).`,
-      });
+      bad(here, "status", `status "${f["status"] ?? ""}" does not match its folder (${issue.status}).`);
     }
-    if (f["kind"] !== "task" && f["kind"] !== "bug") {
-      out.push({ path: here, message: 'kind must be "task" or "bug".' });
+    const kind = f["kind"];
+    if (!(KINDS as readonly string[]).includes(kind ?? "")) {
+      bad(here, "kind", `kind must be ${KINDS.map((k) => `"${k}"`).join(", ").replace(/, ("bug")$/, " or $1")}.`);
+    } else if (issue.id && parseFolderName(issue.folder)) {
+      // The bug- prefix and kind: bug must agree (front matter is the source of truth).
+      if (kind === "bug" && !hasBugPrefix) {
+        bad(here, "bug-prefix", `kind is bug but the folder name has no "${BUG_PREFIX}" prefix. Run "${TOOL} set ${issue.id} --kind bug" to fix it.`);
+      } else if (kind !== "bug" && hasBugPrefix) {
+        bad(here, "bug-prefix", `The folder name has the "${BUG_PREFIX}" prefix but kind is ${kind}. Run "${TOOL} set ${issue.id} --kind ${kind}" to fix it.`);
+      }
     }
     if (f["released-in"] && !SEMVER_RE.test(f["released-in"])) {
-      out.push({ path: here, message: `released-in "${f["released-in"]}" is not valid semver.` });
+      bad(here, "released-in", `released-in "${f["released-in"]}" is not valid semver.`);
     }
     if (f["priority"] && !(PRIORITIES as readonly string[]).includes(f["priority"])) {
-      out.push({ path: here, message: `priority "${f["priority"]}" must be one of: ${PRIORITIES.join(", ")} (or empty).` });
+      bad(here, "priority", `priority "${f["priority"]}" must be one of: ${PRIORITIES.join(", ")} (or empty).`);
     }
   }
 
   for (const [id, list] of byId) {
     if (list.length > 1) {
-      out.push({
-        path: list.map((k) => k.path).join(", "),
-        message: `ID ${id} is used more than once.`,
-      });
+      bad(list.map((k) => k.path).join(", "), "duplicate-id", `ID ${id} is used more than once.`);
     }
   }
 
@@ -435,14 +470,12 @@ function collect(root: string, out: Problem[]): void {
   for (const { path, fields } of idless) {
     const here = `${path}/${ISSUE_FILE}`;
     if (fields["id"] === undefined || fields["id"] === "") {
-      out.push({ path: here, message: "id is required." });
+      bad(here, "id", "id is required.");
     } else if (!isValidId(fields["id"])) {
-      out.push({ path: here, message: `id "${fields["id"]}" is not a valid ID.` });
+      bad(here, "id", `id "${fields["id"]}" is not a valid ID.`);
     }
     const parent = fields["parent"];
-    if (parent && (!isValidId(parent) || !byId.has(parent))) {
-      out.push({ path: here, message: `parent ${parent} does not exist.` });
-    }
+    if (parent && (!isValidId(parent) || !byId.has(parent))) bad(here, "parent", `parent ${parent} does not exist.`);
   }
 
   // Parent checks need the full ID set.
@@ -450,22 +483,17 @@ function collect(root: string, out: Problem[]): void {
     const here = `${known.path}/${ISSUE_FILE}`;
     const parent = fields["parent"];
     if (known.depth === 1) {
-      if (parent !== undefined) {
-        out.push({ path: here, message: "A level-1 issue must omit the parent field." });
-      }
+      if (parent !== undefined) bad(here, "parent", "A level-1 issue must omit the parent field.");
       continue;
     }
     if (!parent) {
-      out.push({
-        path: here,
-        message: `parent is required (expected ${parentOf(known.id)} unless the work moved).`,
-      });
+      bad(here, "parent", `parent is required (expected ${parentOf(known.id)} unless the work moved).`);
       continue;
     }
     if (!isValidId(parent) || !byId.has(parent)) {
-      out.push({ path: here, message: `parent ${parent} does not exist.` });
+      bad(here, "parent", `parent ${parent} does not exist.`);
     } else if (depth(parent) >= known.depth) {
-      out.push({ path: here, message: `parent ${parent} must be at a shallower level than ${known.id}.` });
+      bad(here, "parent", `parent ${parent} must be at a shallower level than ${known.id}.`);
     }
   }
 
@@ -477,11 +505,11 @@ function collect(root: string, out: Problem[]): void {
       const ids = splitIdList(fields[key] ?? "");
       for (const target of ids) {
         if (!isValidId(target)) {
-          out.push({ path: here, message: `${key} "${target}" is not a valid ID.` });
+          bad(here, key, `${key} "${target}" is not a valid ID.`);
         } else if (!byId.has(target)) {
-          out.push({ path: here, message: `${key} ${target} does not exist.` });
+          bad(here, key, `${key} ${target} does not exist.`);
         } else if (target === known.id) {
-          out.push({ path: here, message: `${key} must not list the issue itself (${target}).` });
+          bad(here, key, `${key} must not list the issue itself (${target}).`);
         }
       }
       if (key === "depends-on") {
@@ -499,10 +527,7 @@ function collect(root: string, out: Problem[]): void {
       const st = state.get(next);
       if (st === 1) {
         const loop = [...trail.slice(trail.indexOf(next)), next];
-        out.push({
-          path: `${pathOf(next)}/${ISSUE_FILE}`,
-          message: `depends-on loop: ${loop.join(" -> ")}.`,
-        });
+        bad(`${pathOf(next)}/${ISSUE_FILE}`, "depends-on-loop", `depends-on loop: ${loop.join(" -> ")}.`);
       } else if (st === undefined) {
         walk(next, [...trail, next]);
       }
@@ -511,5 +536,21 @@ function collect(root: string, out: Problem[]): void {
   };
   for (const id of dependsGraph.keys()) {
     if (!state.has(id)) walk(id, [id]);
+  }
+
+  // Warning: a generated roadmap that no longer matches the issues. No warning when there is no file.
+  const roadmapFile = join(root, ISSUES_DIR, ROADMAP_FILE);
+  try {
+    if (existsSync(roadmapFile) && !lstatSync(roadmapFile).isSymbolicLink()) {
+      if (readFileSync(roadmapFile, "utf8") !== buildRoadmap(readIssues(root, s))) {
+        result.warnings.push({
+          path: `${ISSUES_DIR}/${ROADMAP_FILE}`,
+          rule: "roadmap-stale",
+          message: `${ROADMAP_FILE} is out of date, run ${TOOL} roadmap.`,
+        });
+      }
+    }
+  } catch {
+    // An unreadable roadmap is not worth failing validation over.
   }
 }

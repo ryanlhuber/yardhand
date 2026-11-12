@@ -28,7 +28,9 @@ test("IDs: matching uses the separator, so 017 never matches 0170", () => {
   assert.equal(leadingId("0170-add-auth"), null);
   assert.equal(leadingId("017.01-add-thing"), "017.01");
   assert.equal(parseFolderName("017-Add"), null);
-  assert.deepEqual(parseFolderName("017.01.01-fix-bug"), { id: "017.01.01", slug: "fix-bug" });
+  assert.deepEqual(parseFolderName("017.01.01-fix-bug"), { id: "017.01.01", slug: "fix-bug", bug: false });
+  assert.deepEqual(parseFolderName("017.01.01-bug-login-loop"), { id: "017.01.01", slug: "login-loop", bug: true });
+  assert.equal(parseFolderName("017-bug-bug-x"), null);
 });
 
 test("IDs: allocation is highest plus one and ignores gaps", () => {
@@ -79,7 +81,9 @@ test("init: updates CLAUDE.md when present, refuses to overwrite config, validat
   assert.match(read(root, "CLAUDE.md"), /# Mine[\s\S]*yardhand:start/);
   assert.throws(() => init(root, ["backlog", "done"], "0.0.0"), /Already initialized/);
   assert.doesNotThrow(() => init(root, ["backlog", "blocked", "done"], "0.0.0", true));
-  assert.throws(() => init(mkdtempSync(join(tmpdir(), "yardhand-")), ["done", "backlog"], "0.0.0"), /first status/);
+  assert.throws(() => init(mkdtempSync(join(tmpdir(), "yardhand-")), ["done", "review"], "0.0.0"), /must include "backlog"/);
+  // backlog no longer has to be first and done no longer has to be last.
+  assert.doesNotThrow(() => init(mkdtempSync(join(tmpdir(), "yardhand-")), ["triage", "backlog", "done", "canceled"], "0.0.0"));
   assert.throws(() => init(mkdtempSync(join(tmpdir(), "yardhand-")), ["backlog", "Bad Name", "done"], "0.0.0"), /kebab/);
   assert.throws(() => init(mkdtempSync(join(tmpdir(), "yardhand-")), ["backlog", "x", "x", "done"], "0.0.0"), /more than once/);
 });
@@ -95,16 +99,16 @@ test("new: allocates IDs, counts done/, and never reuses", () => {
   assert.equal(newIssue(root, { slug: "write-tests", parent: "001.01" }).id, "001.01.02");
   moveIssue(root, "001", "done");
   assert.equal(newIssue(root, { slug: "add-billing" }).id, "002");
-  assert.equal(newIssue(root, { slug: "fix-typo", parent: "000", kind: "bug" }).id, "000.01");
-  assert.match(read(root, "issues/backlog/000.01-fix-typo/ISSUE.md"), /kind: bug/);
+  assert.equal(newIssue(root, { slug: "typo-in-readme", parent: "000", kind: "bug" }).id, "000.01");
+  assert.match(read(root, "issues/backlog/000.01-bug-typo-in-readme/ISSUE.md"), /kind: bug/);
   assert.deepEqual(validate(root), []);
 });
 
 test("new: rejects bad slugs, missing parents, and a fourth level", () => {
   const root = repo();
-  assert.throws(() => newIssue(root, { slug: "Add Auth" }), /kebab-case/);
+  assert.throws(() => newIssue(root, { slug: "9 lives" }), /kebab-case/);
+  assert.equal(newIssue(root, { slug: "Add Auth" }).path, "issues/backlog/001-add-auth/ISSUE.md");
   assert.throws(() => newIssue(root, { slug: "x-y", parent: "042" }), /does not exist/);
-  newIssue(root, { slug: "one" });
   newIssue(root, { slug: "two", parent: "001" });
   newIssue(root, { slug: "three", parent: "001.01" });
   assert.throws(() => newIssue(root, { slug: "four", parent: "001.01.01" }), /third level/);
@@ -132,7 +136,9 @@ test("move: rejects unknown status, unknown ID, and same status", () => {
   newIssue(root, { slug: "add-auth" });
   assert.throws(() => moveIssue(root, "001", "review"), /Unknown status/);
   assert.throws(() => moveIssue(root, "042", "done"), /not found/);
-  assert.throws(() => moveIssue(root, "001", "backlog"), /already in/);
+  const same = moveIssue(root, "001", "backlog");
+  assert.equal(same.unchanged, true);
+  assert.equal(moveIssue(root, "001", "Backlog").unchanged, true);
 });
 
 test("validate: reports each kind of problem", () => {
@@ -178,7 +184,7 @@ test("validate: parent rules, including work moved to a different parent", () =>
   assert.match(validate(root)[0]!.message, /parent is required/);
   const top = "issues/backlog/001-one/ISSUE.md";
   writeFileSync(join(root, piece), read(root, piece).replace("kind: task", "kind: task\nparent: 001"));
-  writeFileSync(join(root, top), read(root, top).replace("kind: task", "kind: task\nparent: 002"));
+  writeFileSync(join(root, top), read(root, top).replace("kind: feature", "kind: feature\nparent: 002"));
   assert.match(validate(root).map((p) => p.message).join("\n"), /must omit the parent field/);
 });
 
@@ -200,8 +206,8 @@ test("CLI end to end", () => {
   const init1 = run("init", "--yes", "--statuses", "backlog,review-1,done");
   assert.equal(init1.status, 0, init1.stderr);
   assert.match(init1.stdout, /npx skills@latest add ryanlhuber\/depot/);
-  assert.equal(run("new", "add-auth").stdout.trim(), "001 issues/backlog/001-add-auth/ISSUE.md");
-  assert.equal(run("new", "add-login", "--parent", "001").stdout.trim().split(" ")[0], "001.01");
+  assert.equal(run("new", "add-auth").stdout.split("\n")[0], "001  issues/backlog/001-add-auth/ISSUE.md");
+  assert.equal(run("new", "add-login", "--parent", "001").stdout.split(/\s+/)[0], "001.01");
   assert.equal(run("move", "001.01", "review-1").status, 0);
   assert.equal(run("move", "001.01", "nope").status, 1);
   const v = run("validate");

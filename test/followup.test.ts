@@ -119,7 +119,7 @@ test("validate: a leftover temp file from an interrupted move is reported", () =
   const root = repo();
   newIssue(root, { slug: "add-auth" });
   write(root, "issues/backlog/001-add-auth/.ISSUE.md.a1b2c3.tmp", "x");
-  assert.match(messages(root), /\.ISSUE\.md\.a1b2c3\.tmp: Leftover temp file from an interrupted move/);
+  assert.match(messages(root), /\.ISSUE\.md\.a1b2c3\.tmp: Leftover temp file from an interrupted change/);
 });
 
 // ---- C5: init takes the same lock
