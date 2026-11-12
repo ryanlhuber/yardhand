@@ -23,8 +23,8 @@ Nothing is installed into your project. `init` writes plain files only.
 | `yardhand init` | Sets up tracking in this repo: creates `issues/`, `issues/yardhand.json`, one folder per status, the `000-maintain-repo` issue, and a rules block in `AGENTS.md` (and `CLAUDE.md` if present). Asks which statuses to use; `backlog` and `done` are always included. |
 | `yardhand init --yes --statuses a,b,c` | Same, without questions. `--statuses` sets your statuses in order (default `backlog,in-progress,done`). Add `--force` to re-run in a repo that is already set up. |
 | `yardhand new <slug>` | Creates an issue with the next free ID in the first status and prints its ID and path. The slug is lowercase kebab-case, verb first, like `add-auth`. |
-| `yardhand new <slug> --parent 017` | Creates a child of `017` (it gets `017.01`, or the next free number). Also accepts `--kind task\|bug` (default `task`) and `--assignee <name>`. |
-| `yardhand new <slug> --priority high --depends-on 017.02 --related 009` | Sets links when you create the issue: `--priority` is `urgent`, `high`, `medium` or `low`; `--depends-on` lists issues that must be finished first; `--related` lists linked issues that don't block. Both take comma-separated IDs that must already exist. |
+| `yardhand new <slug> --parent 017` | Creates a child of `017` (it gets `017.01`, or the next free number). Also accepts `--kind task\|bug` (default `task`) and `--assignee <name>`. `--kind bug` adds `bug-` to the folder name, so don't type it in the slug. |
+| `yardhand new <slug> --priority 1 --depends-on 017.02 --related 009` | Sets priority and links when you create the issue: `--priority` is `1`, `2` or `3` (1 is highest) and adds `p1-`, `p2-` or `p3-` to the folder name; `--depends-on` lists issues that must be finished first; `--related` lists linked issues that don't block. Both take comma-separated IDs that must already exist. |
 | `yardhand move <id> <status>` | Moves the issue folder to another status and updates `status:` in its `ISSUE.md`. |
 | `yardhand validate` | Checks every issue and reports each problem with its path. Exits `1` if anything is wrong, so it works in CI. |
 | `yardhand --help`, `--version` | Prints the commands, or the installed version. |
@@ -42,8 +42,10 @@ issues/
       notes.md             # reference files sit beside ISSUE.md
     017.01-add-login/
       ISSUE.md
+    017.01.02-p1-bug-login-redirect-loop/   # priority 1 bug
+      ISSUE.md
   in-progress/
-    017.01.01-build-login-form/
+    017.01.01-p2-build-login-form/          # priority 2
       ISSUE.md
   done/
 ```
@@ -64,8 +66,32 @@ The ID shows what rolls up to what.
 - `000` is the catch-all for maintenance and bugs with no clear home. `init` creates `000-maintain-repo`.
 - IDs are permanent and never reused, even after an issue is done. The next ID is the highest existing one plus one, counting every status folder.
 - Nobody invents IDs. `yardhand new` picks the next free one.
-- The folder is `<id>-<slug>`. Slugs can change; the ID is the key.
+- The folder is `<id>-[p1|p2|p3-][bug-]<slug>`. Slugs can change; the ID is the key.
 - A bug is a normal issue with `kind: bug`.
+
+### Folder name prefixes
+
+Priority and bug status show in the folder name, so you can read them in a file tree without opening files.
+
+| Prefix | Meaning |
+|---|---|
+| `p1-` | Priority 1, the highest |
+| `p2-` | Priority 2 |
+| `p3-` | Priority 3 |
+| `bug-` | The issue is a bug |
+
+```
+017.01.02-p1-bug-login-redirect-loop
+017.01.01-p1-add-login-form
+017.01.04-add-avatar-upload
+```
+
+- Prefixes come right after the ID, priority first, then `bug-`. No priority prefix means no priority.
+- The ID stays at the start of the name, so `017-*` style searches keep working.
+- Front matter is the source of truth. `validate` reports a prefix that doesn't match `priority:` or `kind:`.
+- Slugs can't start with a reserved prefix. `bug-` is the one exception to verb first: after it, name the symptom (`login-redirect-loop`), not the fix. `fix-` is not reserved and is fine for cleanups.
+- Changing priority or kind renames the folder. The ID never changes, and reference files keep working because they use relative paths.
+- Keep the name after the ID to 40 characters or less so sidebars don't cut it off. `validate` warns above that.
 
 ## ISSUE.md
 
@@ -87,9 +113,9 @@ released-in:
 ## Acceptance criteria
 ```
 
-`id` matches the folder name. `kind` is `task` or `bug`. `parent` is the ID one level up (omit it for level 1) and is the source of truth for rollup, so moving work to a new parent means changing `parent:`, not the folder or ID. `status` matches the folder (`move` keeps them in sync). The rest are optional:
+`id` matches the folder name. `kind` is `task` or `bug` (`bug` goes with the `bug-` folder prefix). `parent` is the ID one level up (omit it for level 1) and is the source of truth for rollup, so moving work to a new parent means changing `parent:`, not the folder or ID. `status` matches the folder (`move` keeps them in sync). The rest are optional:
 
-- `priority`: `urgent`, `high`, `medium` or `low`. Blank means none.
+- `priority`: `1`, `2` or `3`, where 1 is the highest. Blank means none. Goes with the `p1-`, `p2-` or `p3-` folder prefix.
 - `depends-on`: IDs that must be finished first, like `017.02, 017.03`. Stored on the dependent issue only. `validate` rejects loops.
 - `related`: IDs that are linked but don't block this issue.
 - `assignee`: which model or person owns it.

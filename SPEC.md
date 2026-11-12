@@ -17,7 +17,7 @@ issues/
 
 - `issues/` is at the repo root. `yardhand.json` lives inside it.
 - Each status in `yardhand.json` has a folder of the same name.
-- Each issue is a folder named `<id>-<slug>/` that contains `ISSUE.md` and any reference files.
+- Each issue is a folder named `<id>-[p1|p2|p3-][bug-]<slug>/` (see "Folder names") that contains `ISSUE.md` and any reference files.
 - Reference files inside an issue use relative paths or the issue ID. Never hardcode `issues/<status>/...`.
 
 ## yardhand.json
@@ -48,6 +48,28 @@ issues/
 - Lowercase kebab-case, verb first, for example `add-auth`.
 - Regex: `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`.
 - Slugs may change. The ID is the key. A rename changes the folder name only.
+- A slug may not start with a reserved prefix (see below), so `p1-add-auth` and `bug-login` are not valid slugs.
+- Exception to verb first: a bug's slug names the symptom, not the fix, for example `login-redirect-loop`. The `bug-` prefix is added to the folder name, not typed into the slug.
+- `fix-` is not reserved. It is an ordinary verb for non-bug work such as cleanup (`fix-typo-in-readme`).
+
+## Folder names
+
+`<id>-[p1|p2|p3-][bug-]<slug>`
+
+```
+017.01.02-p1-bug-login-redirect-loop
+017.01.01-p1-add-login-form
+017.01.04-add-avatar-upload
+```
+
+- The ID is always the start of the name. Nothing goes before it.
+- Reserved prefixes appear only right after the ID, in this order: a priority prefix, then `bug-`. Both are optional.
+- `p1-`, `p2-`, `p3-` mean priority 1 (highest), 2, and 3. No priority prefix means no priority.
+- `bug-` means the issue is a bug.
+- The prefixes are a visible copy of front matter, so priority and kind can be read from a file tree without opening files. Front matter is the source of truth.
+- Letters and symbols are never added to the ID, and `!` is not used in names (it triggers shell history expansion).
+- Soft limit: the part of the folder name after the ID should be at most 40 characters so sidebars do not cut it off. `validate` warns above that and does not fail.
+- Changing an issue's priority or kind renames the folder. The ID never changes, and reference files keep working because they use relative paths or the issue ID.
 
 ## ISSUE.md
 
@@ -70,10 +92,10 @@ released-in:
 ```
 
 - `id`: required. Must equal the ID in the folder name.
-- `kind`: required, `task` or `bug`.
+- `kind`: required, `task` or `bug`. `bug` requires the `bug-` prefix in the folder name.
 - `parent`: required for levels 2 and 3 and must be the ID with its last segment removed. Omitted for level 1. See "Moving work to a different parent" for the one exception.
 - `status`: required. Must equal the name of the status folder the issue is in.
-- `priority`: optional. One of `urgent`, `high`, `medium`, `low`. Empty means no priority.
+- `priority`: optional. One of `1`, `2`, `3`, where 1 is the highest. Empty means no priority. A set priority requires the matching `p1-`, `p2-`, or `p3-` prefix in the folder name.
 - `depends-on`: optional. A comma-separated list of issue IDs that must be finished first, for example `017.02, 017.03`. The link is stored on the dependent issue only; there is no reverse field. A `depends-on` loop (A needs B and B needs A) is an error.
 - `related`: optional. A comma-separated list of issue IDs that are linked but do not block this issue. Related links may point both ways.
 - `assignee`: optional single-line text. `yardhand new` rejects an assignee that contains a control character (C0, DEL, or C1, a newline or tab included), a Unicode line or paragraph separator (U+2028, U+2029), or `#`. The check is on the value as given, before any trimming; surrounding spaces are then trimmed.
@@ -102,9 +124,9 @@ Non-interactive: `yardhand init --yes [--statuses a,b,c]`. Defaults to `backlog,
 
 Creates `issues/`, `issues/yardhand.json`, and one folder per status (with a `.gitkeep` in each empty one). Creates the catch-all `000-maintain-repo` issue in the first status, so `000.NN` children (maintenance, bugs with no clear home) have a parent. Adds or updates the Yardhand block in `AGENTS.md`, and in `CLAUDE.md` if that file exists. Prints the Depot install command as a suggestion. Never runs it. Refuses to overwrite an existing `yardhand.json` unless `--force`. It takes the same lock as `new` and `move`, and runs the same completeness check, so a status list that omits a folder holding issues, or a tree it cannot fully read, is refused before anything is written. The catch-all is created with exclusive operations and is never overwritten. If `issues/` exists but cannot be read, `init` fails; it only starts fresh when nothing is set up. It validates `--statuses` even when it is empty.
 
-### `yardhand new <slug> [--parent <id>] [--kind task|bug] [--assignee <name>] [--priority <level>] [--depends-on <ids>] [--related <ids>]`
+### `yardhand new <slug> [--parent <id>] [--kind task|bug] [--assignee <name>] [--priority <1|2|3>] [--depends-on <ids>] [--related <ids>]`
 
-Allocates the next ID, creates `issues/<first-status>/<id>-<slug>/ISSUE.md` from the template, and prints the ID and the path. With no `--parent` it creates a level-1 issue. Fails if the parent does not exist or the parent is already level 3. `--priority` must be one of the four levels. `--depends-on` and `--related` take comma-separated IDs, and every ID must already exist. A failed `new` creates nothing.
+Allocates the next ID, creates `issues/<first-status>/<id>-[p1|p2|p3-][bug-]<slug>/ISSUE.md` from the template, and prints the ID and the path. The `pN-` prefix is added when `--priority` is given, and `bug-` when `--kind bug` is given. With no `--parent` it creates a level-1 issue. Fails if the parent does not exist or the parent is already level 3. Fails if the slug starts with a reserved prefix. `--priority` must be `1`, `2`, or `3`. `--depends-on` and `--related` take comma-separated IDs, and every ID must already exist. A failed `new` creates nothing.
 
 ### `yardhand move <id> <status>`
 
@@ -116,7 +138,7 @@ Checks and reports every problem with its path, and keeps going after a problem;
 
 1. `yardhand.json` is valid (rules above). An invalid config is reported as a problem.
 2. Every status has a folder. Every folder under `issues/` is a status or reported as unknown.
-3. Every issue folder matches `<id>-<slug>`, with a valid ID and slug.
+3. Every issue folder matches `<id>-[p1|p2|p3-][bug-]<slug>`, with a valid ID and slug. Reserved prefixes are in the order priority, then `bug-`.
 4. Every issue folder contains `ISSUE.md` with valid front matter.
 5. `id` equals the ID in the folder name.
 6. `status` equals the folder's status.
@@ -125,9 +147,12 @@ Checks and reports every problem with its path, and keeps going after a problem;
 9. `parent` exists. A level 1 issue omits the field entirely (an empty `parent:` is an error). For levels 2 and 3, `parent` is non-empty, exists, and has a shallower depth.
 10. `released-in`, if set, is valid semver.
 11. No key appears twice in the front matter.
-12. `priority`, if set, is `urgent`, `high`, `medium`, or `low`.
+12. `priority`, if set, is `1`, `2`, or `3`.
 13. Every ID in `depends-on` and `related` is valid, exists, and is not the issue itself.
 14. `depends-on` has no loops.
+15. `kind: bug` and the `bug-` prefix go together: each requires the other.
+16. `priority: N` and the `pN-` prefix go together: each requires the other, and no priority means no priority prefix.
+17. Warning only: the part of the folder name after the ID is longer than 40 characters.
 
 ### Exit codes
 
@@ -153,6 +178,11 @@ The tool name, config filename, issues folder name, issue filename, and block ma
 ## Out of v1
 
 `roadmap`, `status add|rename|remove`, the frontend, a dev-dependency prompt, a harness picker, `releases/<version>.md` generation.
+
+Planned next, to support folder-name prefixes:
+
+- `yardhand prioritize <id> <1|2|3|none>`: updates `priority:` and renames the folder to match. The ID never changes.
+- `yardhand list`: prints a table read from front matter (priority, ID, kind, status, name), priorities first. A `!` marks prioritized issues in this output only, never in folder names.
 
 ## CLI behavior
 
