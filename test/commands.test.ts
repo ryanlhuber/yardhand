@@ -493,3 +493,11 @@ test("new: builds the folder in staging and leaves no staging folder behind", ()
   assert.deepEqual(readdirSync(join(root, "issues/backlog")).filter((n) => n.startsWith(".new-")), []);
   assert.deepEqual(validate(root), []);
 });
+
+test("bare yardhand without a terminal prints the help and does not run init", () => {
+  const root = mkdtempSync(join(tmpdir(), "yardhand-bare-"));
+  const r = cli(root);
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /yardhand init/);
+  assert.equal(existsSync(join(root, "issues")), false);
+});
