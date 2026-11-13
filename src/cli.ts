@@ -1,8 +1,8 @@
 import { parseArgs } from "node:util";
 import pkg from "../package.json";
-import { DEFAULT_STATUSES } from "./config.js";
+import { DEFAULT_STATUSES, findRoot } from "./config.js";
 import { DEPOT_INSTALL, ISSUES_DIR, TOOL } from "./names.js";
-import { YardhandError } from "./errors.js";
+import { NotInitializedError, YardhandError } from "./errors.js";
 import { check, init, moveIssue, newIssue } from "./commands.js";
 import { setIssue } from "./set.js";
 import { formatTable, listIssues } from "./list.js";
@@ -66,7 +66,20 @@ const splitList = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolea
 const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? one : many}`;
 const out = (text: string) => process.stdout.write(text.endsWith("\n") ? text : text + "\n");
 
+/** True when there is no yardhand setup here or above. Any other error (such as an unreadable root) counts as set up. */
+function notSetUp(cwd: string): boolean {
+  try {
+    findRoot(cwd);
+    return false;
+  } catch (err) {
+    return err instanceof NotInitializedError;
+  }
+}
+
 async function main(argv: string[]): Promise<number> {
+  // A bare `yardhand` in a terminal, in a repo that is not set up yet, walks through init (like `npm create vite`).
+  // Everywhere else (already set up, or not a terminal) it prints the help.
+  if (argv.length === 0 && process.stdin.isTTY && process.stdout.isTTY && notSetUp(process.cwd())) argv = ["init"];
   const [command, ...rest] = argv;
   const isHelp = !command || command === "--help" || command === "-h" || command === "help";
   const isVersion = command === "--version" || command === "-v";

@@ -172,6 +172,10 @@ Warnings:
 
 `--json` prints `{ "ok": true|false, "errors": [...], "warnings": [...] }`, each entry having `path`, `rule` and `message`. A done issue without `released-in` is not flagged.
 
+### Bare `yardhand`
+
+With no command: if stdin and stdout are both a terminal and no `issues/yardhand.json` is found here or above, it runs the interactive `init`. In every other case (already set up, not a terminal, or a root that cannot be read) it prints the help. `--help`, `--version` and every explicit command are unchanged.
+
 ### Exit codes
 
 0 success, 1 validation or usage error.
