@@ -146,3 +146,6 @@ export function splitIdList(value: string): string[] {
   }
   return out;
 }
+
+/** Characters that would change how a front-matter line parses: control characters, line/paragraph separators, and "#". */
+export const UNSAFE_ASSIGNEE = new RegExp("[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029#]");

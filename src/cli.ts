@@ -82,8 +82,9 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
   const cwd = process.cwd();
-  // `<command> --help` prints that command's usage, whatever else was typed after it.
+  // `<command> --help` prints that command's usage. Anything else typed with it is an error.
   if (command in USAGE && rest.some((a) => a === "--help" || a === "-h")) {
+    if (rest.length > 1) throw new YardhandError(`Unexpected argument "${rest.find((a) => a !== "--help" && a !== "-h")}". Run "${TOOL} ${command} --help" on its own.`);
     out(USAGE[command as keyof typeof USAGE]);
     return 0;
   }

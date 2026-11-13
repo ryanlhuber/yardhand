@@ -116,11 +116,11 @@ Interactive by default, in a terminal:
 
 Non-interactive: `yardhand init --yes [--statuses a,b,c]`. Defaults to `backlog,in-progress,done`. `--statuses` is taken as the order and must already be valid (no normalization).
 
-Creates `issues/`, `issues/yardhand.json`, and one folder per status (with a `.gitkeep` in each empty one). Creates the catch-all `000-maintain-repo` issue in `backlog` (whichever status comes first), so `000.NN` children (maintenance, bugs with no clear home) have a parent. Adds or updates the Yardhand block in `AGENTS.md`, and in `CLAUDE.md` if that file exists. Prints the Depot install command as a suggestion. Never runs it. Refuses to overwrite an existing `yardhand.json` unless `--force`. It takes the same lock as `new` and `move`, and runs the same completeness check, so a status list that omits a folder holding issues, or a tree it cannot fully read, is refused before anything is written. The catch-all is created with exclusive operations and is never overwritten. If `issues/` exists but cannot be read, `init` fails; it only starts fresh when nothing is set up. It validates `--statuses` even when it is empty.
+Creates `issues/`, `issues/yardhand.json`, and one folder per status (with a `.gitkeep` in each empty one). Creates the catch-all `000-maintain-repo` issue in `backlog` (even when another status comes first), so `000.NN` children (maintenance, bugs with no clear home) have a parent. Adds or updates the Yardhand block in `AGENTS.md`, and in `CLAUDE.md` if that file exists. Prints the Depot install command as a suggestion. Never runs it. Refuses to overwrite an existing `yardhand.json` unless `--force`. It takes the same lock as `new` and `move`, and runs the same completeness check, so a status list that omits a folder holding issues, or a tree it cannot fully read, is refused before anything is written. The catch-all is created with exclusive operations and is never overwritten. If `issues/` exists but cannot be read, `init` fails; it only starts fresh when nothing is set up. It validates `--statuses` even when it is empty.
 
 ### `yardhand new <slug> [--parent <id>] [--kind feature|task|bug] [--priority urgent|high|medium|low] [--depends-on <ids>] [--related <ids>] [--assignee <name>]`
 
-Allocates the next ID, creates `issues/<first-status>/<id>-[bug-]<slug>/ISSUE.md` from the template, and prints the ID, the path, and a summary line (kind, priority, parent, status). The slug is normalized. A leading `bug-` in the slug becomes `--kind bug`, and the output says so; it fails if `--kind` says otherwise. Without `--kind`, level 1 is a `feature` and deeper levels are `task`. With no `--parent` it creates a level-1 issue. Fails if the parent does not exist or the parent is already level 3. `--depends-on` and `--related` take comma-separated IDs, and every ID must already exist. A failed `new` creates nothing.
+Allocates the next ID, creates `issues/<first-status>/<id>-[bug-]<slug>/ISSUE.md` from the template, and prints the ID, the path, and a summary line (kind, priority, parent, status). The slug is normalized. A leading `bug-` in the slug becomes `--kind bug`, and the output says so; it fails if `--kind` says otherwise. Without `--kind`, level 1 is a `feature` and deeper levels are `task`. With no `--parent` it creates a level-1 issue. Fails if the parent does not exist or the parent is already level 3. `--depends-on` and `--related` take comma-separated IDs, and every ID must already exist. `new` builds the issue folder under a temporary `.new-*.tmp` name and renames it into place, so a failed `new` leaves nothing behind.
 
 ### `yardhand move <id> <status>`
 
@@ -128,7 +128,7 @@ Moves the issue folder to the status folder and rewrites `status:` in `ISSUE.md`
 
 ### `yardhand set <id> [--kind ...] [--priority urgent|high|medium|low|none] [--parent <id>] [--depends-on <ids>|none] [--related <ids>|none] [--assignee <name>|none] [--released-in <semver>|none]`
 
-Changes fields on an existing issue. At least one flag is required. A value replaces the old one and `none` clears the field. `id` and `status` cannot be set (use `move`). Every change is validated before anything is written: IDs must exist, `parent` must be shallower than the issue (and a level-1 issue has none), `depends-on` cannot create a loop, `released-in` must be semver. Changing `kind` renames the folder (adds or removes `bug-`); nothing else does. Setting a field to its current value changes nothing and succeeds.
+Changes fields on an existing issue. At least one flag is required. A value replaces the old one and `none` clears the field. `id` and `status` cannot be set (use `move`). Every change is validated before anything is written: IDs must exist, `parent` must be shallower than the issue (and a level-1 issue has none), `depends-on` cannot create a loop, `released-in` must be semver. Passing `--kind` also makes the folder name agree with the kind (adds or removes `bug-`), even when the front-matter value is already right; this is the repair `validate` points to. Nothing else renames a folder. Setting a field to its current value changes nothing and succeeds.
 
 ### `yardhand list [--status <name>] [--parent <id>] [--kind <kind>] [--priority <level>] [--json]`
 
@@ -140,7 +140,7 @@ Writes `issues/ROADMAP.md`, a tree built from `parent:` fields: every issue, don
 
 ### `yardhand release <semver> [--dry-run]`
 
-Sets `released-in: <version>` on every issue in `done` that has none, and writes `issues/releases/<version>.md` (version, date, stamped issues grouped by top-level issue). Issues with an earlier version are not touched. Fails if that release file already exists. A version lower than an existing release only warns. With nothing to release it prints so, writes nothing, and succeeds. `--dry-run` changes nothing. It does not run `git tag` or `npm version`.
+Sets `released-in: <version>` on every issue in `done` that has none, and writes `issues/releases/<version>.md` (version, date, stamped issues grouped by top-level issue). Issues with an earlier version are not touched. Fails if that release file already exists. If an earlier run stamped issues but stopped before writing the release file, running the same version again rebuilds the file from the issues already stamped with it. A version lower than an existing release only warns. With nothing to release it prints so, writes nothing, and succeeds. `--dry-run` changes nothing. It does not run `git tag` or `npm version`.
 
 ### `yardhand validate [--json]`
 
@@ -149,7 +149,7 @@ Checks and reports every problem with its path, and keeps going after a problem;
 Errors:
 
 1. `yardhand.json` is valid (rules above). An invalid config is reported as a problem.
-2. Every status has a folder. Every folder under `issues/` is a status, `releases`, or reported as unknown.
+2. Every status has a folder. Every folder under `issues/` is a status, `releases`, or reported as unknown. The only loose files allowed in `issues/` are `yardhand.json` and `ROADMAP.md`; any other file is an error.
 3. Every issue folder matches `<id>-[bug-]<slug>`, with a valid ID and slug. A second `bug-` is a reserved-prefix error.
 4. Every issue folder contains `ISSUE.md` with valid front matter.
 5. `id` equals the ID in the folder name.
@@ -163,6 +163,7 @@ Errors:
 13. `priority`, if set, is `urgent`, `high`, `medium`, or `low`.
 14. Every ID in `depends-on` and `related` is valid, exists, and is not the issue itself.
 15. `depends-on` has no loops.
+16. `assignee`, if set, is a single line with no `#` or control characters (the same rule `new` and `set` enforce).
 
 Warnings:
 
@@ -198,6 +199,6 @@ The tool name, config filename, issues folder name, issue filename, roadmap file
 
 ## CLI behavior
 
-- Unknown options and extra arguments are errors for every command. `--help` and `--version` accept no extra arguments. `<command> --help` prints that command's usage.
+- Unknown options and extra arguments are errors for every command. `--help` and `--version` accept no extra arguments. `<command> --help` prints that command's usage and accepts nothing else after it.
 - Errors go to stderr, results to stdout, exit code 1 on failure. Output is written before the process ends, so a slow reader still receives every line.
 - Paths in output always use forward slashes.
