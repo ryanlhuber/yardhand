@@ -8,6 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { YardhandError, NotInitializedError } from "./errors.js";
 import { CONFIG_FILE, ISSUES_DIR, ISSUE_FILE, TOOL } from "./names.js";
@@ -37,19 +38,19 @@ import {
   parseFolderName,
   splitIdList,
   splitPrefix,
+  UNSAFE_ASSIGNEE,
 } from "./ids.js";
 import { parseFrontMatter, setField } from "./frontmatter.js";
 import { commitIssue, TMP_RE, tryRemove } from "./commit.js";
 import { readIssues, parentField } from "./issues.js";
 import { buildRoadmap } from "./roadmap.js";
-import { ROADMAP_FILE } from "./names.js";
+import { RELEASES_DIR, ROADMAP_FILE } from "./names.js";
 import { renderIssue } from "./template.js";
 import { applyBlocks, planBlocks, renderBlock } from "./block.js";
 import { withLock } from "./lock.js";
 
 const errCode = (err: unknown) => (err as NodeJS.ErrnoException).code ?? "error";
 // Control characters (C0, DEL, and C1), Unicode line/paragraph separators, and "#" could change how the file parses.
-const UNSAFE_ASSIGNEE = new RegExp("[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029#]");
 
 export interface InitResult {
   root: string;
@@ -212,27 +213,32 @@ export function newIssue(cwd: string, opts: NewOptions): NewResult {
     const statusDir = join(root, ISSUES_DIR, status);
     mkdirSync(statusDir, { recursive: true });
     const dir = join(statusDir, folderName(id, slug, kind === "bug"));
+    if (existsSync(dir)) throw new YardhandError(`${rel(root, dir)} already exists.`);
+    // Build the folder under a temporary name, then rename it into place, so a failed write
+    // can never leave a half-made issue behind.
+    const staging = join(statusDir, `.new-${randomBytes(6).toString("hex")}.tmp`);
     try {
-      mkdirSync(dir);
+      mkdirSync(staging);
+      writeFileSync(
+        join(staging, ISSUE_FILE),
+        renderIssue({
+          id,
+          kind,
+          parent: opts.parent ?? null,
+          status,
+          assignee: assignee.trim(),
+          priority,
+          dependsOn,
+          related,
+        }),
+        { flag: "wx" },
+      );
+      renameSync(staging, dir);
     } catch (err) {
-      if (errCode(err) === "EEXIST") throw new YardhandError(`${rel(root, dir)} already exists.`);
+      rmSync(staging, { recursive: true, force: true });
       throw err;
     }
     const file = join(dir, ISSUE_FILE);
-    writeFileSync(
-      file,
-      renderIssue({
-        id,
-        kind,
-        parent: opts.parent ?? null,
-        status,
-        assignee: assignee.trim(),
-        priority,
-        dependsOn,
-        related,
-      }),
-      { flag: "wx" },
-    );
     return { id, path: rel(root, file), kind, priority, parent: opts.parent ?? null, status, notes };
   });
 }
@@ -358,6 +364,7 @@ function collect(root: string, result: CheckResult): void {
   const s = scan(root, config);
 
   for (const d of s.unknownDirs) bad(`${ISSUES_DIR}/${d}`, "unknown-folder", `Folder is not a status in ${CONFIG_FILE}.`);
+  for (const f of s.strayFiles) bad(`${ISSUES_DIR}/${f}`, "unknown-file", `Unexpected file. ${ISSUES_DIR}/ holds only ${CONFIG_FILE}, ${ROADMAP_FILE}, status folders and ${RELEASES_DIR}/.`);
   for (const st of s.missingStatuses) bad(`${ISSUES_DIR}/${st}`, "status-folder", "Status folder is missing.");
   for (const st of s.badStatusPaths) bad(`${ISSUES_DIR}/${st}`, "status-folder", "Status path is not a readable folder.");
   for (const link of s.symlinks) bad(`${ISSUES_DIR}/${link}`, "symlink", "Symlinks are not supported.");
@@ -451,6 +458,9 @@ function collect(root: string, result: CheckResult): void {
       } else if (kind !== "bug" && hasBugPrefix) {
         bad(here, "bug-prefix", `The folder name has the "${BUG_PREFIX}" prefix but kind is ${kind}. Run "${TOOL} set ${issue.id} --kind ${kind}" to fix it.`);
       }
+    }
+    if (f["assignee"] && UNSAFE_ASSIGNEE.test(f["assignee"])) {
+      bad(here, "assignee", "assignee must be a single line of text and must not contain # or control characters.");
     }
     if (f["released-in"] && !SEMVER_RE.test(f["released-in"])) {
       bad(here, "released-in", `released-in "${f["released-in"]}" is not valid semver.`);

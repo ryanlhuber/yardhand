@@ -17,6 +17,7 @@ import {
   isValidId,
   parseFolderName,
   splitIdList,
+  UNSAFE_ASSIGNEE,
 } from "./ids.js";
 
 export interface SetOptions {
@@ -43,7 +44,6 @@ export interface SetResult {
   unchanged: boolean;
 }
 
-const UNSAFE_ASSIGNEE = new RegExp("[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029#]");
 const isNone = (v: string) => v.trim().toLowerCase() === "none";
 const show = (v: string) => (v === "" ? "none" : v);
 
@@ -154,15 +154,11 @@ export function setIssue(cwd: string, id: string, opts: SetOptions): SetResult {
       if (!same) changes.push({ field, from: show(from), to: show(to) });
     }
     const here = rel(root, issue.dir);
-    if (changes.length === 0) return { id, path: here, changes, unchanged: true };
 
-    let updated = text;
-    for (const c of changes) updated = upsertField(updated, c.field, next[c.field] as string);
-
-    // Only a kind change touches the folder name (the bug- prefix).
+    // Passing --kind also reconciles the folder name (the bug- prefix) with the kind,
+    // even when the front-matter value is already right. This is the repair path validate points to.
     let destDir: string | undefined;
-    const kindChange = changes.find((c) => c.field === "kind");
-    if (kindChange) {
+    if (next["kind"] !== undefined) {
       const parsed = parseFolderName(issue.folder);
       if (!parsed) throw new YardhandError(`${here} has an invalid folder name. Run validate and fix it first.`);
       const name = folderName(id, parsed.slug, next["kind"] === "bug");
@@ -171,6 +167,11 @@ export function setIssue(cwd: string, id: string, opts: SetOptions): SetResult {
         if (existsSync(destDir)) throw new YardhandError(`${rel(root, destDir)} already exists.`);
       }
     }
+    if (changes.length === 0 && destDir === undefined) return { id, path: here, changes, unchanged: true };
+
+    let updated = text;
+    for (const c of changes) updated = upsertField(updated, c.field, next[c.field] as string);
+
     const finalDir = commitIssue(root, issue, updated, {
       destDir,
       what: "the changes",

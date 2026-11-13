@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { check, init, moveIssue, newIssue, validate } from "../src/commands.js";
@@ -427,4 +427,69 @@ test("every command answers --help with its own usage", () => {
   }
   assert.match(cli(root, "new", "--help").stdout, /--assignee/);
   assert.match(cli(root, "--help").stdout, /yardhand release <semver>/);
+});
+
+// ---- review fixes (0.2.1)
+
+test("set --kind repairs a folder whose bug- prefix disagrees with an already-correct kind", () => {
+  const root = repo();
+  newIssue(root, { slug: "fix-login" });
+  const f = join(root, "issues/backlog/001-fix-login/ISSUE.md");
+  writeFileSync(f, read(root, "issues/backlog/001-fix-login/ISSUE.md").replace(/^kind: .*/m, "kind: bug"));
+  assert.ok(validate(root).some((e) => /bug-/.test(e.message)));
+  const r = setIssue(root, "001", { kind: "bug" });
+  assert.equal(r.unchanged, false);
+  assert.ok(existsSync(join(root, "issues/backlog/001-bug-fix-login/ISSUE.md")));
+  assert.deepEqual(validate(root), []);
+  // Running it again is a real no-op.
+  assert.equal(setIssue(root, "001", { kind: "bug" }).unchanged, true);
+});
+
+test("validate: a loose file in issues/ is an error, ROADMAP.md and the config are not", () => {
+  const root = repo();
+  roadmap(root);
+  assert.deepEqual(validate(root), []);
+  writeFileSync(join(root, "issues/garbage.txt"), "x");
+  const errs = validate(root);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0]!.message, /Unexpected file/);
+});
+
+test("validate: a hand-edited assignee with control characters is an error", () => {
+  const root = repo();
+  newIssue(root, { slug: "add-auth" });
+  const f = join(root, "issues/backlog/001-add-auth/ISSUE.md");
+  writeFileSync(f, read(root, "issues/backlog/001-add-auth/ISSUE.md").replace(/^assignee:.*/m, "assignee: bad name"));
+  assert.ok(validate(root).some((e) => /assignee/.test(e.message)));
+});
+
+test("<command> --help with extra arguments is an error", () => {
+  const root = repo();
+  const bad = cli(root, "new", "--help", "extra");
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stderr, /Unexpected argument "extra"/);
+  assert.equal(cli(root, "new", "--help").status, 0);
+});
+
+test("release: rebuilds a missing release file from issues already stamped with that version", () => {
+  const root = repo();
+  newIssue(root, { slug: "add-auth" });
+  moveIssue(root, "001", "done");
+  release(root, "1.0.0", false);
+  const file = join(root, "issues/releases/1.0.0.md");
+  rmSync(file);
+  const again = release(root, "1.0.0", false);
+  assert.equal(again.stamped.length, 0);
+  assert.ok(existsSync(file));
+  assert.match(readFileSync(file, "utf8"), /001/);
+  // With the file back, the version is permanent again.
+  assert.throws(() => release(root, "1.0.0", false), /already released/);
+});
+
+test("new: builds the folder in staging and leaves no staging folder behind", () => {
+  const root = repo();
+  const r = newIssue(root, { slug: "add-auth" });
+  assert.ok(existsSync(resolve(root, r.path)));
+  assert.deepEqual(readdirSync(join(root, "issues/backlog")).filter((n) => n.startsWith(".new-")), []);
+  assert.deepEqual(validate(root), []);
 });

@@ -55,7 +55,10 @@ export function release(cwd: string, version: string, dryRun = false): ReleaseRe
     const targets = issues
       .filter((i) => i.id && i.status === DONE && i.fields && !i.fields["released-in"])
       .sort(byId);
-    if (targets.length === 0) return { version, stamped: [], file: null, dryRun, notes: [...notes, "Nothing to release."] };
+    // Issues already stamped with this version by an earlier run that stopped before writing the release file.
+    const pending = issues.filter((i) => i.id && i.status === DONE && i.fields?.["released-in"] === version);
+    if (targets.length === 0 && pending.length === 0) return { version, stamped: [], file: null, dryRun, notes: [...notes, "Nothing to release."] };
+    if (targets.length === 0) notes.push(`Rebuilding the missing release file from ${pending.length} issue(s) already stamped ${version}.`);
     if (dryRun) return { version, stamped: targets.map((i) => i.id as string), file: null, dryRun, notes };
 
     // Read and prepare everything before changing anything.

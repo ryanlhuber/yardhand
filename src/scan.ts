@@ -1,6 +1,6 @@
 import { lstatSync, readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { ISSUES_DIR, ISSUE_FILE, RELEASES_DIR } from "./names.js";
+import { CONFIG_FILE, ISSUES_DIR, ISSUE_FILE, RELEASES_DIR, ROADMAP_FILE } from "./names.js";
 import { YardhandError } from "./errors.js";
 import { leadingId } from "./ids.js";
 import type { Config } from "./config.js";
@@ -18,6 +18,8 @@ export interface Scan {
   issues: IssueDir[];
   /** Folders directly under issues/ that are not a configured status. */
   unknownDirs: string[];
+  /** Loose files directly under issues/ other than the config and the roadmap. */
+  strayFiles: string[];
   /** Unknown folders that hold, or may hold, issue folders, so IDs in them would be invisible. */
   strayIssues: string[];
   /** Configured statuses with no folder. */
@@ -71,6 +73,7 @@ export function scan(root: string, config: Config): Scan {
   const out: Scan = {
     issues: [],
     unknownDirs: [],
+    strayFiles: [],
     strayIssues: [],
     missingStatuses: [],
     badStatusPaths: [],
@@ -90,6 +93,8 @@ export function scan(root: string, config: Config): Scan {
     const kind = kindOf(join(base, entry));
     if (kind === "link") out.symlinks.push(entry);
     if (kind === "error") out.unreadable.push(entry);
+    // Only the config and the generated roadmap may sit loose in issues/.
+    if (kind === "file" && entry !== CONFIG_FILE && entry !== ROADMAP_FILE) out.strayFiles.push(entry);
     if (kind === "dir") {
       out.unknownDirs.push(entry);
       const holds = holdsIssues(join(base, entry));
