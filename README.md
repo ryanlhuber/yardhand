@@ -14,6 +14,8 @@ Node 20 or newer. Use your project's package manager:
 
 Below, `yardhand init` means `npx yardhand init`, `pnpm dlx yardhand init`, or `bunx yardhand init`. If your `package.json` pins pnpm (`devEngines` or `packageManager`), npm fails with `EBADDEVENGINES`, so use `pnpm dlx` there.
 
+In a terminal, in a repo that isn't set up yet, you can skip the word `init`: `npx yardhand@latest` (or `pnpm dlx yardhand@latest`, `bunx yardhand@latest`) walks you through setup. In a repo that already has `issues/`, or when there is no terminal, a bare `yardhand` prints the help.
+
 Nothing is installed into your project. `init` writes plain files only.
 
 ## Commands
