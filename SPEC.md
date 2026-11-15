@@ -1,4 +1,4 @@
-# Yardhand spec (0.3)
+# Yardhand spec (0.4)
 
 Yardhand is a file-based issue tracker that lives in a repo. Status is a folder, an issue is a folder, and the rules are mechanical so a script or a model can follow them. This file is the source of truth. Code and tests follow it.
 
