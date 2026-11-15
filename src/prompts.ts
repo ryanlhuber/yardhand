@@ -4,6 +4,7 @@ import { RELEASES_DIR, TOOL } from "./names.js";
 import { STATUS_RE, normalizeName } from "./ids.js";
 import { AGENTS, type Agent } from "./config.js";
 import { AGENT_LABELS } from "./agents.js";
+import { BUILT_IN_ABOUT } from "./block.js";
 
 /** Statuses offered in the checklist, in their default workflow order. `backlog` and `done` are always included. */
 export const OPTIONAL_STATUSES = ["triage", "ready", "in-progress", "review", "merge-ready", "blocked", "canceled"] as const;
@@ -138,7 +139,7 @@ export async function promptStatuses(): Promise<StatusAnswers> {
   const chosen = await p.multiselect({
     message: "Which statuses do you want? (backlog and done are always included)",
     options: [
-      ...OPTIONAL_STATUSES.map((s) => ({ value: s as string, label: s })),
+      ...OPTIONAL_STATUSES.map((s) => ({ value: s as string, label: s, hint: BUILT_IN_ABOUT[s] })),
       { value: CUSTOM, label: "Add custom statuses…" },
     ],
     initialValues: ["ready", "in-progress"],
