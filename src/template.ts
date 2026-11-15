@@ -18,6 +18,8 @@ export interface NewIssueFields {
   dependsOn?: string[];
   related?: string[];
   effort?: string;
+  /** Write the effort line even when empty. False when AI is off; a set effort is always written. */
+  withEffort?: boolean;
 }
 
 /** Comments written after each field, so people (and models) editing by hand know the allowed values. */
@@ -62,10 +64,9 @@ export function renderFrontMatter(f: NewIssueFields): string[] {
     line("depends-on", formatList(f.dependsOn ?? [])),
     line("related", formatList(f.related ?? [])),
     line("assignee", quoteHandle(f.assignee)),
-    line("effort", f.effort ?? ""),
-    line("released-in", ""),
-    "---",
   );
+  if ((f.withEffort ?? true) || f.effort) lines.push(line("effort", f.effort ?? ""));
+  lines.push(line("released-in", ""), "---");
   return lines;
 }
 
@@ -87,9 +88,9 @@ export function renderIssue(f: NewIssueFields): string {
 }
 
 /** The catch-all `000-maintain-repo` issue that `init` creates. It is never finished, so it has no checkboxes. */
-export function renderMaintainRepo(status: string, tool: string): string {
+export function renderMaintainRepo(status: string, tool: string, withEffort = true): string {
   return [
-    ...renderFrontMatter({ id: "000", kind: "feature", parent: null, status, assignee: "", title: "" }),
+    ...renderFrontMatter({ id: "000", kind: "feature", parent: null, status, assignee: "", title: "", withEffort }),
     "",
     "# Maintain repo",
     "",

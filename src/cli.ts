@@ -8,17 +8,22 @@ import { setIssue } from "./set.js";
 import { formatTable, listIssues } from "./list.js";
 import { roadmap } from "./roadmap.js";
 import { release } from "./release.js";
-import { confirmYes, promptStatuses } from "./prompts.js";
+import { confirmYes, promptAgents, promptStatuses } from "./prompts.js";
+import { detectAgents, parseAgents } from "./agents.js";
+import { loadConfig, type Agent } from "./config.js";
 import * as p from "@clack/prompts";
 
 const USAGE = {
-  init: `${TOOL} init [--yes] [--statuses a,b,c] [--force] [--no-ignore] [--no-ci]
+  init: `${TOOL} init [--yes] [--statuses a,b,c] [--agents a,b|none] [--force] [--no-ignore] [--no-ci]
 
-  Creates ${ISSUES_DIR}/ with one folder per status. In a terminal it asks which statuses you want and in what order.
+  Creates ${ISSUES_DIR}/ with one folder per status. In a terminal it asks which statuses you want and in what order,
+  and which AI tools will work in the repo (none is fine: then nothing about AI is written).
   It also offers to add ${ISSUES_DIR}/ to an existing .npmignore and .dockerignore, and to add a GitHub Action
   (${WORKFLOW_FILE}) that runs validate on every push. Without questions, both default to yes.
   --yes             use backlog, ready, in-progress, done without asking
   --statuses a,b,c  use exactly these statuses, in this order (must include backlog and done)
+  --agents a,b      AI tools to set up: claude-code, codex, opencode, other. "none" leaves AI out.
+                    Default: the tools already in ${ISSUES_DIR}/yardhand.json or the repo, else other (AGENTS.md only)
   --force           overwrite the statuses of an already initialized repo (labels and assignees are kept)
   --no-ignore       do not add ${ISSUES_DIR}/ to .npmignore or .dockerignore
   --no-ci           do not add the GitHub Action`,
@@ -123,17 +128,34 @@ async function main(argv: string[]): Promise<number> {
           force: { type: "boolean" },
           "no-ignore": { type: "boolean" },
           "no-ci": { type: "boolean" },
+          agents: { type: "string" },
         },
       });
+      let agents: Agent[] | undefined;
+      if (values.agents !== undefined) {
+        const parsed = parseAgents(values.agents);
+        if (typeof parsed === "string") throw new YardhandError(parsed);
+        agents = parsed;
+      }
       let statuses: string[];
+      let about: Record<string, string> | undefined;
       let ignore = !values["no-ignore"];
       let ci = !values["no-ci"];
       if (values.statuses !== undefined) statuses = splitList(values.statuses);
       else if (values.yes) statuses = DEFAULT_STATUSES;
       else if (process.stdin.isTTY) {
         interactive = true;
-        statuses = await promptStatuses();
+        ({ statuses, about } = await promptStatuses());
         const root = initRoot(cwd);
+        if (agents === undefined) {
+          let saved: Agent[] | undefined;
+          try {
+            saved = loadConfig(root).agents;
+          } catch {
+            // Not set up yet, or the config is being replaced: fall back to what is in the repo.
+          }
+          agents = await promptAgents(saved ?? detectAgents(root));
+        }
         const targets = ignoreTargets(root);
         if (ignore && targets.length) {
           ignore = await confirmYes(`Add ${ISSUES_DIR}/ to ${targets.join(" and ")} so it never ships in a package or image?`);
@@ -142,15 +164,26 @@ async function main(argv: string[]): Promise<number> {
           ci = await confirmYes(`Add a GitHub Action that runs ${TOOL} validate on every push?`);
         }
       } else throw new YardhandError(`Not a terminal. Use "${TOOL} init --yes" (optionally with --statuses a,b,c).`);
-      const result = init(cwd, statuses, pkg.version, values.force ?? false, { ignore, ci });
+      const result = init(cwd, statuses, pkg.version, values.force ?? false, { ignore, ci, agents, about });
       const lines = [
         `Created ${ISSUES_DIR}/ with statuses: ${result.statuses.join(" → ")}`,
-        `Updated: ${result.blocks.join(", ")}`,
+        result.agents.length ? `AI tools: ${result.agents.join(", ")}` : "AI: off",
       ];
+      if (result.blocks.length) lines.push(`Updated: ${result.blocks.join(", ")}`);
+      const byDir = (files: string[]) =>
+        [...new Set(files.map((f) => f.split("/").slice(0, 2).join("/")))]
+          .map((d) => `${files.filter((f) => f.startsWith(d + "/")).length} in ${d}/`)
+          .join(", ");
+      if (result.skills.written.length) lines.push(`Skills: ${byDir(result.skills.written)}`);
+      if (result.skills.removed.length) lines.push(`Removed skills: ${byDir(result.skills.removed)}`);
       if (result.ignoreFiles.length) lines.push(`Added ${ISSUES_DIR}/ to: ${result.ignoreFiles.join(", ")}`);
       if (result.workflow) lines.push(`Created ${result.workflow} (runs ${TOOL} validate on every push)`);
       if (interactive) p.outro(lines.join("\n"));
       else out(lines.join("\n"));
+      warn([
+        ...result.skills.skipped.map((f) => `${f} was not written by ${TOOL}, so it was left alone.`),
+        ...result.conflicts,
+      ]);
       return 0;
     }
     case "new": {

@@ -2,6 +2,9 @@ import { emitKeypressEvents } from "node:readline";
 import * as p from "@clack/prompts";
 import { RELEASES_DIR, TOOL } from "./names.js";
 import { STATUS_RE, normalizeName } from "./ids.js";
+import { AGENTS, type Agent } from "./config.js";
+import { AGENT_LABELS } from "./agents.js";
+import { BUILT_IN_ABOUT } from "./block.js";
 
 /** Statuses offered in the checklist, in their default workflow order. `backlog` and `done` are always included. */
 export const OPTIONAL_STATUSES = ["triage", "ready", "in-progress", "review", "merge-ready", "blocked", "canceled"] as const;
@@ -124,13 +127,19 @@ function cancel(): never {
   process.exit(1);
 }
 
-/** The interactive `init` flow: pick statuses, add custom ones, and order them. */
-export async function promptStatuses(): Promise<string[]> {
+export interface StatusAnswers {
+  statuses: string[];
+  /** Descriptions typed for custom statuses. Skipped ones are left out. */
+  about: Record<string, string>;
+}
+
+/** The interactive `init` flow: pick statuses, add custom ones, describe them, and order them. */
+export async function promptStatuses(): Promise<StatusAnswers> {
   p.intro(`${TOOL} init`);
   const chosen = await p.multiselect({
     message: "Which statuses do you want? (backlog and done are always included)",
     options: [
-      ...OPTIONAL_STATUSES.map((s) => ({ value: s as string, label: s })),
+      ...OPTIONAL_STATUSES.map((s) => ({ value: s as string, label: s, hint: BUILT_IN_ABOUT[s] })),
       { value: CUSTOM, label: "Add custom statuses…" },
     ],
     initialValues: ["ready", "in-progress"],
@@ -155,10 +164,24 @@ export async function promptStatuses(): Promise<string[]> {
     p.log.info(`Creating: ${custom.join(", ")}`);
   }
 
+  // One question per custom status, in the order typed. Enter skips it.
+  const about: Record<string, string> = {};
+  for (const name of custom) {
+    const text = await p.text({
+      message: `What happens in ${name}? (one line, Enter to skip)`,
+      placeholder: "A person tests it on staging before done.",
+      validate: (v) =>
+        // eslint-disable-next-line no-control-regex
+        /[\u0000-\u001f\u007f\u2028\u2029]/.test(v ?? "") ? "Use one line of plain text." : undefined,
+    });
+    if (p.isCancel(text)) return cancel();
+    if (typeof text === "string" && text.trim()) about[name] = text.trim();
+  }
+
   // Always shown: the right order is the team's decision, not the tool's. Enter accepts it as is.
   const order = await reorderPrompt(orderStatuses(picked, custom));
   if (order === null) return cancel();
-  return order;
+  return { statuses: order, about };
 }
 
 /** Ask a yes/no question that defaults to yes. Cancelling stops init with nothing changed. */
@@ -166,4 +189,16 @@ export async function confirmYes(message: string): Promise<boolean> {
   const answer = await p.confirm({ message, initialValue: true });
   if (p.isCancel(answer)) return cancel();
   return answer as boolean;
+}
+
+/** Ask which AI tools will work in the repo. `checked` are pre-selected. Nothing picked turns AI off. */
+export async function promptAgents(checked: Agent[]): Promise<Agent[]> {
+  const answer = await p.multiselect({
+    message: "Which AI tools will work in this repo? (pick none to leave AI out)",
+    options: AGENTS.map((a) => ({ value: a as string, label: AGENT_LABELS[a] })),
+    initialValues: checked,
+    required: false,
+  });
+  if (p.isCancel(answer)) return cancel();
+  return answer as Agent[];
 }

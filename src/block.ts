@@ -9,19 +9,47 @@ import {
   TOOL,
 } from "./names.js";
 import { YardhandError } from "./errors.js";
-import type { Config } from "./config.js";
+import type { Agent, Config } from "./config.js";
+import { importsAgentsMd, skillDirsFor, SKILLS } from "./agents.js";
+import { SKILL_PREFIX } from "./names.js";
+
+/** What the built-in statuses mean. A description in "about" replaces these. */
+export const BUILT_IN_ABOUT: Record<string, string> = {
+  triage: "New and not sorted yet.",
+  backlog: "Not refined yet.",
+  ready: "Refined, sized, validated and safe to build.",
+  "in-progress": "Claimed and being worked on.",
+  review: "Built, waiting for someone other than the builder to review it.",
+  "merge-ready": "Reviewed, waiting to be merged.",
+  blocked: "Waiting on something outside the issue.",
+  done: "Finished.",
+  canceled: "Will not be done.",
+};
+
+/** One line per status: what happens there. A status with no description is hands-off for models. */
+export function statusMeanings(config: Config): string[] {
+  return config.statuses.map((s) => {
+    const about = config.about?.[s] ?? BUILT_IN_ABOUT[s];
+    return about ? `  - \`${s}\`: ${about}` : `  - \`${s}\`: no description. Do not move issues into or out of it unless asked.`;
+  });
+}
 
 /** The generated "Work items" block. Built from the config and CLI version so it cannot drift. */
 export function renderBlock(config: Config, version: string): string {
   const statuses = config.statuses.join(" → ");
+  const dirs = skillDirsFor(config.agents ?? ["other"]);
+  const skills = SKILLS.map((s) => `\`${SKILL_PREFIX}${s.name}\``).join(", ");
   return [
     BLOCK_START,
     `## Work items (${TOOL} v${version})`,
     "",
+    `This section covers issue tracking in \`${ISSUES_DIR}/\`. For anything else, the rest of this file wins.`,
+    "",
     `Issues are files in this repo. \`${TOOL}\` manages them. Do not edit this block by hand; \`${TOOL} init\` regenerates it.`,
     "",
     `- **Where:** \`${ISSUES_DIR}/<status>/<id>-<slug>/${ISSUE_FILE}\`. An issue's status is the folder it is in.`,
-    `- **Statuses, in order:** ${statuses} (defined in \`${ISSUES_DIR}/${CONFIG_FILE}\`, with the allowed \`labels\` and \`assignees\`).`,
+    `- **Statuses, in order:** ${statuses} (defined in \`${ISSUES_DIR}/${CONFIG_FILE}\`, with the allowed \`labels\` and \`assignees\`, and status descriptions under \`about\`). What each one means:`,
+    ...statusMeanings(config),
     "- **IDs:** `017` (a feature or goal), `017.01` (a piece of it), `017.01.01` (a buildable unit, one model session). Three levels at most. `000` is the catch-all for maintenance and bugs with no clear home. Bugs are issues with `kind: bug`. New issues start in the first status.",
     `- **Use the commands** for new IDs, status changes and front matter. Without them, follow these rules exactly: the next ID is the highest existing one plus one (check every status folder, including done), IDs are never reused, \`status:\` matches the folder, and the front matter comments stay. The H1 title and the body are fine to edit by hand.`,
     `  - Create: \`npx ${TOOL} new <slug> [--parent <id>] [--kind feature|task|bug] [--priority urgent|high|medium|low] [--size small|medium|large] [--labels <names>] [--depends-on <ids>] [--related <ids>] [--assignee @handle] [--effort <word>]\``,
@@ -32,9 +60,12 @@ export function renderBlock(config: Config, version: string): string {
     `  - Before finishing any work that touches issues: \`npx ${TOOL} validate\``,
     "- **Folder names:** `<id>-<slug>`, or `<id>-bug-<slug>` for bugs. The `bug-` prefix is added for you; priority, size, labels, assignee and effort are only in front matter.",
     `- **Fields:** \`priority:\` urgent, high, medium, low. \`size:\` small, medium, large (only on issues with no children). \`labels:\`, \`depends-on:\` and \`related:\` are lists, written \`[a, b]\`. \`assignee:\` is a quoted handle like \`"@claude-opus"\`. \`effort:\` is one word in the assigned model's own terms. Blank means unset.`,
-    "- **Picking up work:** take an issue from `ready` whose `depends-on` issues are all `done`, highest priority first, then lowest ID. Claim it by moving it to `in-progress` and setting `assignee` to yourself. Build it on a branch named `<id>-<slug>`. Tick its acceptance criteria, then move it to `review` if that status exists, else `done`.",
+    "- **Picking up work:** take an issue from `ready` whose `depends-on` issues are all `done`, highest priority first, then lowest ID. Claim it by moving it to `in-progress` and setting `assignee` to yourself. Build it on a branch named `<id>-<slug>` (if this repo has its own branch naming rule, follow it and put the issue ID in the branch name). Tick its acceptance criteria, then move it to `review` if that status exists, else `done`.",
     `- **Rollup:** the \`parent:\` field in ${ISSUE_FILE} decides what rolls up to what, not the folder name.`,
     `- **Reference files** inside an issue folder use relative paths, never \`${ISSUES_DIR}/<status>/...\` paths.`,
+    ...(dirs.length
+      ? [`- **Skills:** ${skills} in ${dirs.map((d) => `\`${d}/\``).join(" and ")} cover planning, refining, building and reviewing issues.`]
+      : []),
     "- **Depot vocabulary:** level 1 is what Depot's skills call an epic; level 3 is a work item.",
     BLOCK_END,
   ].join("\n");
@@ -72,24 +103,34 @@ export interface BlockWrite {
 }
 
 /**
- * Work out the AGENTS.md (created if missing) and CLAUDE.md (only if it exists) updates without writing.
+ * Work out the AGENTS.md and CLAUDE.md updates without writing. AGENTS.md is created if missing.
+ * CLAUDE.md is only touched when Claude Code is one of the agents: an existing one gets the block,
+ * unless it already imports AGENTS.md (then Claude Code reads the block from there); a missing one is
+ * created with just that import line.
  *
  * Files are handled as latin1, which maps every byte to one character and back, so bytes outside the
  * block (even invalid UTF-8) come back exactly as they were. The block's own UTF-8 bytes are carried
  * through the same way. The markers are ASCII, so searching still works.
  */
-export function planBlocks(root: string, block: string): BlockWrite[] {
+export function planBlocks(root: string, block: string, agents: Agent[] = ["other"]): BlockWrite[] {
+  if (agents.length === 0) return [];
   const asBytes = Buffer.from(block, "utf8").toString("latin1");
   const plan: BlockWrite[] = [];
-  for (const [name, create] of [
-    ["AGENTS.md", true],
-    ["CLAUDE.md", false],
-  ] as const) {
-    const path = join(root, name);
-    const exists = existsSync(path);
-    if (!exists && !create) continue;
-    const current = exists ? readFileSync(path).toString("latin1") : "";
-    plan.push({ name, path, content: upsertBlock(current, asBytes, name) });
+  const agentsPath = join(root, "AGENTS.md");
+  const agentsText = existsSync(agentsPath) ? readFileSync(agentsPath).toString("latin1") : "";
+  plan.push({ name: "AGENTS.md", path: agentsPath, content: upsertBlock(agentsText, asBytes, "AGENTS.md") });
+  if (agents.includes("claude-code")) {
+    const path = join(root, "CLAUDE.md");
+    if (!existsSync(path)) {
+      plan.push({ name: "CLAUDE.md", path, content: "@AGENTS.md\n" });
+    } else {
+      const current = readFileSync(path).toString("latin1");
+      // An import line plus no block of ours: Claude Code already reads the block through AGENTS.md.
+      const hasBlock = current.includes(BLOCK_START) || current.includes(BLOCK_END);
+      if (hasBlock || !importsAgentsMd(current)) {
+        plan.push({ name: "CLAUDE.md", path, content: upsertBlock(current, asBytes, "CLAUDE.md") });
+      }
+    }
   }
   return plan;
 }
