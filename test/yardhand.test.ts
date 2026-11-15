@@ -46,7 +46,8 @@ test("IDs: allocation is highest plus one and ignores gaps", () => {
 test("front matter: setField keeps comments and other lines", () => {
   const text = "---\nid: 017\nstatus: backlog     # must match\nkind: task\n---\n\n## Description\n";
   const out = setField(text, "status", "done");
-  assert.match(out, /status: done {5}# must match/);
+  assert.match(out, /status: done {8}# must match/, "the comment stays in the same column");
+  assert.match(setField(text, "status", "a-very-long-status-name"), /status: a-very-long-status-name # must match/, "at least one space");
   assert.equal(parseFrontMatter(out)?.fields["status"], "done");
   assert.equal(parseFrontMatter(out)?.fields["kind"], "task");
 });
@@ -64,11 +65,17 @@ test("init: creates statuses, config, 000, and the AGENTS.md block", () => {
   const root = repo(["backlog", "review-1", "merge-ready", "done"]);
   assert.deepEqual(JSON.parse(read(root, "issues/yardhand.json")), {
     statuses: ["backlog", "review-1", "merge-ready", "done"],
+    labels: [],
+    assignees: {},
   });
   for (const s of ["backlog", "review-1", "merge-ready", "done"]) {
     assert.ok(existsSync(join(root, "issues", s)), s);
   }
-  assert.ok(existsSync(join(root, "issues/backlog/000-maintain-repo/ISSUE.md")));
+  const catchAll = read(root, "issues/backlog/000-maintain-repo/ISSUE.md");
+  assert.match(catchAll, /^# Maintain repo$/m);
+  assert.match(catchAll, /Never move it to `done`/);
+  assert.doesNotMatch(catchAll, /- \[ \]/, "the catch-all has no checkboxes");
+  assert.doesNotMatch(catchAll, /^parent:/m);
   assert.match(read(root, "AGENTS.md"), /backlog → review-1 → merge-ready → done/);
   assert.ok(!existsSync(join(root, "CLAUDE.md")), "CLAUDE.md is only updated if it exists");
   assert.deepEqual(validate(root), []);
@@ -180,7 +187,7 @@ test("validate: parent rules, including work moved to a different parent", () =>
   assert.deepEqual(validate(root), []);
   writeFileSync(join(root, piece), read(root, piece).replace("parent: 002", "parent: 077"));
   assert.match(validate(root)[0]!.message, /parent 077 does not exist/);
-  writeFileSync(join(root, piece), read(root, piece).replace(/parent: 077\n/, ""));
+  writeFileSync(join(root, piece), read(root, piece).replace(/^parent: 077.*\n/m, ""));
   assert.match(validate(root)[0]!.message, /parent is required/);
   const top = "issues/backlog/001-one/ISSUE.md";
   writeFileSync(join(root, piece), read(root, piece).replace("kind: task", "kind: task\nparent: 001"));
@@ -205,7 +212,7 @@ test("CLI end to end", () => {
   assert.equal(run("init").status, 1, "no terminal and no --yes");
   const init1 = run("init", "--yes", "--statuses", "backlog,review-1,done");
   assert.equal(init1.status, 0, init1.stderr);
-  assert.match(init1.stdout, /npx skills@latest add ryanlhuber\/depot/);
+  assert.doesNotMatch(init1.stdout, /depot/i, "init suggests no other tools");
   assert.equal(run("new", "add-auth").stdout.split("\n")[0], "001  issues/backlog/001-add-auth/ISSUE.md");
   assert.equal(run("new", "add-login", "--parent", "001").stdout.split(/\s+/)[0], "001.01");
   assert.equal(run("move", "001.01", "review-1").status, 0);

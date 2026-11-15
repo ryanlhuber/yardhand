@@ -203,11 +203,14 @@ test("validate: a folder with no recognizable ID still gets every other check", 
 
 test("assignee: separators, edge newlines, and control characters are rejected; ordinary text is kept", () => {
   const root = repo();
-  for (const bad of [`Alice${LS}Bob`, `Alice${PS}Bob`, "\nAlice\n", "Alice\r", "A\tB", "#team", "x # y"]) {
+  const cfg = join(root, "issues/yardhand.json");
+  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, "utf8")), assignees: { "@alice": "person" } }));
+  for (const bad of [`Alice${LS}Bob`, `Alice${PS}Bob`, "\nAlice\n", "Alice\r", "A\tB", "#team", "x # y", "Zoë Müller", "@bob"]) {
     assert.throws(() => newIssue(root, { slug: "a-bad", assignee: bad }), /assignee/, JSON.stringify(bad));
   }
-  const { path } = newIssue(root, { slug: "a-good", assignee: "  Zoë Müller  " });
-  assert.equal(parseFrontMatter(read(root, path))?.fields["assignee"], "Zoë Müller");
+  const { path } = newIssue(root, { slug: "a-good", assignee: "  alice  " });
+  assert.equal(parseFrontMatter(read(root, path))?.fields["assignee"], "@alice");
+  assert.match(read(root, path), /^assignee: "@alice" +#/m, "written quoted");
   assert.deepEqual(validate(root), []);
 });
 

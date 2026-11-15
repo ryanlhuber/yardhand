@@ -1,6 +1,8 @@
 # yardhand
 
-File-based issue tracking that lives in your repo. Status is a folder, an issue is a folder, and every rule is mechanical, so a script or an AI model can follow it. Built for one developer working with several models.
+File-based issue tracking that lives in your repo. Status is a folder, an issue is a folder, and every rule is mechanical, so a script or an AI model can follow it.
+
+The files are the source of truth. The CLI is the fast, checked way to change them, but every rule can also be followed by hand in a text editor or GitHub's web editor, and AI is optional. `init` can add a GitHub Action that runs `yardhand validate` on every push, so mistakes are caught however a change was made.
 
 ## Run it
 
@@ -22,24 +24,25 @@ Nothing is installed into your project. `init` writes plain files only.
 
 | Command | What it does |
 |---|---|
-| `yardhand init` | Sets up tracking in this repo: creates `issues/`, `issues/yardhand.json`, one folder per status, the `000-maintain-repo` issue (in `backlog`), and a rules block in `AGENTS.md` (and `CLAUDE.md` if present). Asks which statuses to use, lets you add custom ones (typed freely, normalized to `kebab-case`), then lets you reorder them. `backlog` and `done` are always included but can sit anywhere in the order. |
-| `yardhand init --yes --statuses a,b,c` | Same, without questions. `--statuses` sets your statuses in order (default `backlog,in-progress,done`). Add `--force` to re-run in a repo that is already set up. |
+| `yardhand init` | Sets up tracking in this repo: creates `issues/`, `issues/yardhand.json`, one folder per status, the `000-maintain-repo` issue (in `backlog`), and a rules block in `AGENTS.md` (and `CLAUDE.md` if present). Asks which statuses to use (`ready` and `in-progress` are pre-checked), lets you add custom ones (typed freely, normalized to `kebab-case`), then always lets you reorder them. `backlog` and `done` are always included but can sit anywhere in the order. It then offers to add `issues/` to an existing `.npmignore` and `.dockerignore`, and, in a git repo, to add `.github/workflows/yardhand.yml`, a GitHub Action that runs `validate` on every push. |
+| `yardhand init --yes --statuses a,b,c` | Same, without questions. `--statuses` sets your statuses in order (default `backlog,ready,in-progress,done`). The ignore entries and the GitHub Action default to yes; skip them with `--no-ignore` and `--no-ci`. Add `--force` to re-run in a repo that is already set up (labels and assignees are kept). |
 | `yardhand new <slug>` | Creates an issue with the next free ID in the first status and prints its ID and path. The slug is normalized to lowercase kebab-case; start it with a verb, like `add-auth`. A level-1 issue is a `feature`, deeper ones are `task`. |
-| `yardhand new <slug> --parent 017` | Creates a child of `017` (it gets `017.01`, or the next free number). Also accepts `--kind feature\|task\|bug` and `--assignee <name>`. A slug starting with `bug-` makes a bug. |
+| `yardhand new <slug> --parent 017` | Creates a child of `017` (it gets `017.01`, or the next free number). Also accepts `--kind feature\|task\|bug`. A slug starting with `bug-` makes a bug. |
 | `yardhand new <slug> --priority high --depends-on 017.02 --related 009` | Sets links when you create the issue: `--priority` is `urgent`, `high`, `medium` or `low`; `--depends-on` lists issues that must be finished first; `--related` lists linked issues that don't block. Both take comma-separated IDs that must already exist. |
+| `yardhand new <slug> --size small --labels backend,auth --assignee claude-opus --effort high` | Sets the rest when you create the issue: `--size` is `small`, `medium` or `large`; `--labels` and `--assignee` must be listed in `issues/yardhand.json` (the `@` is added if you leave it off); `--effort` is one word in the assigned model's own terms. |
 | `yardhand move <id> <status>` | Moves the issue folder to another status and updates `status:`. Moving to the current status does nothing. Children stay where they are; the output lists them. |
-| `yardhand set <id> --priority high` | Changes fields on an existing issue: `--kind`, `--priority`, `--parent`, `--depends-on`, `--related`, `--assignee`, `--released-in`. A value replaces the old one; `none` clears it. Changing `--kind` renames the folder (adds or removes `bug-`). |
-| `yardhand list` | Shows every issue in every status, sorted by priority then ID. Filters: `--status`, `--parent`, `--kind`, `--priority`. Add `--json` for scripts. |
-| `yardhand roadmap` | Writes `issues/ROADMAP.md`, a tree of every issue built from `parent:` fields, with done counts. `--stdout` prints it instead. |
+| `yardhand set <id> --priority high` | Changes fields on an existing issue: `--kind`, `--priority`, `--size`, `--labels`, `--parent`, `--depends-on`, `--related`, `--assignee`, `--effort`, `--released-in`. A value replaces the old one; `none` clears it. Changing `--kind` renames the folder (adds or removes `bug-`). Comments in the front matter are kept. |
+| `yardhand list` | Shows every issue in every status, sorted by priority then ID. Filters: `--status`, `--parent`, `--kind`, `--priority`, `--size`, `--label`, `--assignee`. Add `--json` for scripts. |
+| `yardhand roadmap` | Writes `issues/ROADMAP.md`, a tree of every issue built from `parent:` fields, with done counts, sizes, and how many large issues are left. `--stdout` prints it instead. |
 | `yardhand release <version>` | Stamps `released-in:` on every issue in `done` that has none and writes `issues/releases/<version>.md`. `--dry-run` previews. |
-| `yardhand validate` | Checks every issue and reports each problem with its path. Exits `1` if anything is wrong, so it works in CI. `--json` for scripts. Warns (without failing) about long slugs and a stale `ROADMAP.md`. |
+| `yardhand validate` | Checks every issue and reports each problem with its path. Exits `1` if anything is wrong, so it works in CI. `--json` for scripts. Warns (without failing) about long slugs, a stale `ROADMAP.md`, `size` on a parent, open `large` issues (consider splitting), done issues with unchecked acceptance criteria, `effort` with no model assigned, and `issues/` that could be published by npm or copied into a Docker image. |
 | `yardhand <command> --help`, `--version` | Prints usage for a command, or the installed version. |
 
 ## Layout
 
 ```
 issues/
-  yardhand.json            # statuses, in order
+  yardhand.json            # statuses in order, allowed labels, assignees
   ROADMAP.md               # generated by `yardhand roadmap`
   releases/
     1.4.0.md               # generated by `yardhand release`
@@ -53,13 +56,33 @@ issues/
       ISSUE.md
     017.02-bug-login-redirect-loop/   # `bug-` marks kind: bug
       ISSUE.md
+  ready/
   in-progress/
     017.01.01-build-login-form/
       ISSUE.md
   done/
 ```
 
-An issue's status is the folder it is in. Reference files inside an issue use relative paths, never `issues/<status>/...`.
+An issue's status is the folder it is in. `backlog` means not refined yet; `ready` means refined, sized, validated and safe to build; `in-progress` means someone (a person or a model) has claimed it. Reference files inside an issue use relative paths, never `issues/<status>/...`.
+
+### yardhand.json
+
+```json
+{
+  "statuses": ["backlog", "ready", "in-progress", "done"],
+  "labels": ["backend", "frontend"],
+  "assignees": {
+    "@ryan": "person",
+    "@claude-opus": "model"
+  }
+}
+```
+
+Edit `labels` and `assignees` by hand. Labels are lowercase kebab-case. Handles are `@` plus lowercase kebab-case, with no dots: GPT-6.1 Sol is `@gpt-6-1-sol`. Never put emails here or in an issue; repos can be public.
+
+### Keep issues out of packages and live sites
+
+A normal build (Vite, Next, `tsc`) only outputs its build folder, so `issues/` stays out. It can leak through `npm publish` without a `files` list, a Docker `COPY . .` without a `.dockerignore` entry, or a host that serves the repo root. `init` offers the ignore entries and `validate` warns about the first two. Deploy from your build output folder, never the repo root.
 
 ## Numbering
 
@@ -74,39 +97,69 @@ The ID shows what rolls up to what.
 - Three levels at most. The first part is three digits, later parts are two (`01` to `99`). There are no zero children: `017.00` is invalid.
 - `000` is the catch-all for maintenance and bugs with no clear home. `init` creates `000-maintain-repo`.
 - IDs are permanent and never reused, even after an issue is done. The next ID is the highest existing one plus one, counting every status folder.
-- Nobody invents IDs. `yardhand new` picks the next free one.
+- Nobody invents IDs. `yardhand new` picks the next free one. Without the CLI, use the same rule: the highest existing ID plus one, across every status folder including `done`.
 - The folder is `<id>-<slug>`. Slugs can change; the ID is the key.
-- A bug is a normal issue with `kind: bug`. Its folder is `<id>-bug-<slug>` (`bug-` is the only reserved prefix, and the tool adds it). Priority is never part of the folder name.
+- A bug is a normal issue with `kind: bug`. Its folder is `<id>-bug-<slug>` (`bug-` is the only reserved prefix, and the tool adds it). Priority, size, labels, assignee and effort are never part of the folder name.
 
 ## ISSUE.md
 
 ```
 ---
+# Required
 id: 017.01.01
-kind: task
-parent: 017.01
-status: backlog
-priority:
-depends-on:
-related:
-assignee:
-released-in:
+kind: task          # feature | task | bug
+parent: 017.01      # omit for level 1 only
+status: backlog     # must match the folder
+
+# Optional (blank = unset)
+priority:           # urgent | high | medium | low
+size:               # small | medium | large
+labels:             # names from issues/yardhand.json, e.g. [backend, auth]
+depends-on:         # issue IDs, e.g. [017.01.01, 017.02]
+related:            # issue IDs
+assignee:           # "@handle" from issues/yardhand.json, e.g. "@claude-opus"
+effort:             # free text, one word, e.g. low | medium | high | xhigh
+released-in:        # set by `release`
 ---
+
+# Build login form
 
 ## Description
 <!-- What and why. A buildable unit should fit one model session. -->
 
 ## Acceptance criteria
-<!-- Checkable outcomes, one per line. -->
+<!-- Checkable outcomes, one per line, as checkboxes: - [ ] ... -->
+- [ ]
 ```
 
 `id` matches the folder name. `kind` is `feature`, `task` or `bug`. `parent` is the ID one level up (omit it for level 1) and is the source of truth for rollup, so moving work to a new parent means changing `parent:`, not the folder or ID. `status` matches the folder (`move` keeps them in sync). The rest are optional (blank means unset):
 
-- `priority`: `urgent`, `high`, `medium` or `low`. Blank means none.
-- `depends-on`: IDs that must be finished first, like `017.02, 017.03`. Stored on the dependent issue only. `validate` rejects loops.
+- `priority`: `urgent`, `high`, `medium` or `low`.
+- `size`: how much of one model session a buildable unit takes. `small` (a few files, under half a session), `medium` (a normal session), `large` (barely fits; consider splitting). Leave it blank on issues with children.
+- `labels`: which part of the codebase it touches, like `[backend, auth]`. Each must be listed in `issues/yardhand.json`.
+- `depends-on`: IDs that must be finished first, like `[017.02, 017.03]`. Stored on the dependent issue only. `validate` rejects loops.
 - `related`: IDs that are linked but don't block this issue.
-- `assignee`: which model or person owns it.
+- `assignee`: who builds it, a person or a model, as a quoted handle like `"@claude-opus"`. Quotes are needed because YAML cannot start a value with `@`.
+- `effort`: how hard the assigned model should think, in that model's own words (`high`, `xhigh`). One word only.
 - `released-in`: a version like `1.4.0`, set by `yardhand release`.
+
+The `# Required` and `# Optional` lines and the comments after each field are for people editing by hand; every command keeps them. Lists are written `[a, b]`; the 0.2 form (`a, b`) still reads. The H1 title starts as the slug in sentence case and can be edited freely; it is never checked against the folder name.
+
+## Picking up work
+
+The same steps for a person, a model, or a script:
+
+1. Take an issue from `ready` whose `depends-on` issues are all `done`. Highest priority first, then lowest ID (`yardhand list --status ready`).
+2. Claim it: move it to `in-progress` and set `assignee` to yourself.
+3. Build it on a branch named `<id>-<slug>`.
+4. Tick the acceptance criteria, then move it to `review` if that status exists, else `done`.
+
+## Upgrading from 0.2
+
+- `init` offers `ready` instead of `todo`. Existing repos keep their statuses; statuses are just names.
+- `assignee` must now be a quoted `@handle` listed under `assignees` in `issues/yardhand.json`. Add your people and models there, then fix each issue with `yardhand set <id> --assignee <handle>`. `validate` lists every issue that needs it.
+- New issues use the grouped template with an H1 title. Existing issues stay valid; `set` adds `size`, `labels` and `effort` lines to them when you first use those flags.
+- Re-run `yardhand init --force --statuses <your current statuses, in order>` to refresh the rules block in `AGENTS.md`. It keeps your labels and assignees.
 
 ## Rules
 

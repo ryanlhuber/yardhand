@@ -100,10 +100,18 @@ test("new: default kind follows depth, and the template lists every field with h
   assert.equal(a.kind, "feature");
   assert.equal(b.kind, "task");
   const text = read(root, a.path);
-  for (const key of ["priority:", "depends-on:", "related:", "assignee:", "released-in:"]) assert.match(text, new RegExp(`^${key}$`, "m"));
+  for (const key of ["priority", "size", "labels", "depends-on", "related", "assignee", "effort", "released-in"]) {
+    assert.match(text, new RegExp(`^${key}: +# `, "m"), `${key} is blank with a hint`);
+  }
+  assert.match(text, /^# Required\nid: 001\n/m);
+  assert.match(text, /^# Optional \(blank = unset\)$/m);
+  assert.ok(text.indexOf("# Required") < text.indexOf("status:") && text.indexOf("status:") < text.indexOf("# Optional"));
+  assert.match(text, /^# Add auth$/m, "H1 title seeded from the slug");
   assert.match(text, /<!-- What and why\./);
   assert.match(text, /<!-- Checkable outcomes/);
+  assert.match(text, /^- \[ \]$/m, "one empty checkbox");
   assert.doesNotMatch(text, /^parent:/m);
+  assert.match(read(root, b.path), /^parent: 001 +# omit for level 1 only$/m);
 });
 
 test("new: --kind bug adds the prefix, a typed bug- prefix converts, and conflicts fail", () => {
@@ -184,7 +192,7 @@ test("set: kind renames the folder, priority does not, and none clears", () => {
   const f = fields(root, "issues/backlog/001.01-add-login/ISSUE.md");
   assert.equal(f["priority"], "");
   assert.equal(f["kind"], "task");
-  assert.match(read(root, "issues/backlog/001.01-add-login/ISSUE.md"), /^priority:$/m, "cleared fields have no trailing space");
+  assert.match(read(root, "issues/backlog/001.01-add-login/ISSUE.md"), /^priority: {11}# urgent/m, "a cleared field keeps its comment in line");
   assert.deepEqual(validate(root), []);
 });
 
@@ -226,9 +234,9 @@ test("set: lists replace, and a depends-on loop is refused", () => {
   const root = repo();
   for (const slug of ["a-one", "a-two", "a-three"]) newIssue(root, { slug });
   setIssue(root, "001", { dependsOn: "002, 003" });
-  assert.equal(fields(root, "issues/backlog/001-a-one/ISSUE.md")["depends-on"], "002, 003");
+  assert.equal(fields(root, "issues/backlog/001-a-one/ISSUE.md")["depends-on"], "[002, 003]");
   setIssue(root, "001", { dependsOn: "002" });
-  assert.equal(fields(root, "issues/backlog/001-a-one/ISSUE.md")["depends-on"], "002");
+  assert.equal(fields(root, "issues/backlog/001-a-one/ISSUE.md")["depends-on"], "[002]");
   setIssue(root, "002", { dependsOn: "003" });
   assert.throws(() => setIssue(root, "003", { dependsOn: "001" }), /loop/);
   setIssue(root, "001", { dependsOn: "none", related: "003" });

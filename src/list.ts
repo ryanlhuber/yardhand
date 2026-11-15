@@ -2,13 +2,16 @@ import { YardhandError } from "./errors.js";
 import { findRoot, loadConfig } from "./config.js";
 import { scan } from "./scan.js";
 import { readIssues, descendantsOf } from "./issues.js";
-import { KINDS, PRIORITIES, isValidId, normalizeName, priorityRank, splitIdList } from "./ids.js";
+import { KINDS, PRIORITIES, SIZES, isValidId, normalizeHandle, normalizeName, priorityRank, splitIdList, splitList } from "./ids.js";
 
 export interface ListFilters {
   status?: string;
   parent?: string;
   kind?: string;
   priority?: string;
+  size?: string;
+  label?: string;
+  assignee?: string;
 }
 
 export interface ListRow {
@@ -16,11 +19,14 @@ export interface ListRow {
   kind: string;
   status: string;
   priority: string;
+  size: string;
+  labels: string[];
   slug: string;
   parent: string;
   dependsOn: string[];
   related: string[];
   assignee: string;
+  effort: string;
   releasedIn: string;
   path: string;
 }
@@ -41,6 +47,12 @@ export function listIssues(cwd: string, filters: ListFilters = {}): ListRow[] {
   if (priority !== undefined && !(PRIORITIES as readonly string[]).includes(priority)) {
     throw new YardhandError(`--priority must be one of: ${PRIORITIES.join(", ")}.`);
   }
+  const size = filters.size?.trim().toLowerCase();
+  if (size !== undefined && !(SIZES as readonly string[]).includes(size)) {
+    throw new YardhandError(`--size must be one of: ${SIZES.join(", ")}.`);
+  }
+  const label = filters.label?.trim();
+  const assignee = filters.assignee === undefined ? undefined : normalizeHandle(filters.assignee);
 
   const all = readIssues(root, scan(root, config));
   let pool = all;
@@ -58,17 +70,23 @@ export function listIssues(cwd: string, filters: ListFilters = {}): ListRow[] {
       kind: f["kind"] ?? (i.bug ? "bug" : ""),
       status: i.status,
       priority: f["priority"] ?? "",
+      size: f["size"] ?? "",
+      labels: splitList(f["labels"] ?? ""),
       slug: i.slug,
       parent: f["parent"] ?? "",
       dependsOn: splitIdList(f["depends-on"] ?? ""),
       related: splitIdList(f["related"] ?? ""),
       assignee: f["assignee"] ?? "",
+      effort: f["effort"] ?? "",
       releasedIn: f["released-in"] ?? "",
       path: i.path,
     };
     if (status !== undefined && row.status !== status) continue;
     if (kind !== undefined && row.kind !== kind) continue;
     if (priority !== undefined && row.priority !== priority) continue;
+    if (size !== undefined && row.size !== size) continue;
+    if (label !== undefined && !row.labels.includes(label)) continue;
+    if (assignee !== undefined && row.assignee !== assignee) continue;
     rows.push(row);
   }
   rows.sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
