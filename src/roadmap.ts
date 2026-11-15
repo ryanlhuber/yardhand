@@ -41,12 +41,22 @@ export function buildRoadmap(all: Issue[]): string {
     return out;
   };
 
+  const isOpen = (i: Issue) => i.status !== DONE && i.status !== CANCELED;
+  const largeLeft = (id: string): number =>
+    descendants(id).filter((c) => isOpen(c) && c.fields?.["size"] === "large" && !(children.get(c.id)?.length)).length;
   const tags = (i: Issue & { id: string }, progress: string | null): string => {
     const parts: string[] = [];
+    const hasChildren = !!children.get(i.id)?.length;
     if (progress) parts.push(progress);
+    if (hasChildren) {
+      const n = largeLeft(i.id);
+      if (n > 0) parts.push(`${n} large left`);
+    }
     if (i.bug || i.fields?.["kind"] === "bug") parts.push("bug");
     const priority = i.fields?.["priority"];
     if (priority) parts.push(priority);
+    const size = i.fields?.["size"];
+    if (size && !hasChildren && i.status !== DONE) parts.push(size);
     if (i.status !== DONE) parts.push(i.status);
     return parts.length ? " · " + parts.join(" · ") : "";
   };

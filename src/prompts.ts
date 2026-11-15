@@ -4,9 +4,9 @@ import { RELEASES_DIR, TOOL } from "./names.js";
 import { STATUS_RE, normalizeName } from "./ids.js";
 
 /** Statuses offered in the checklist, in their default workflow order. `backlog` and `done` are always included. */
-export const OPTIONAL_STATUSES = ["triage", "todo", "in-progress", "review", "merge-ready", "blocked", "canceled"] as const;
+export const OPTIONAL_STATUSES = ["triage", "ready", "in-progress", "review", "merge-ready", "blocked", "canceled"] as const;
 /** Where each known status sits by default. Custom statuses go after all of these. */
-export const DEFAULT_ORDER = ["triage", "backlog", "todo", "in-progress", "review", "merge-ready", "blocked", "done", "canceled"];
+export const DEFAULT_ORDER = ["triage", "backlog", "ready", "in-progress", "review", "merge-ready", "blocked", "done", "canceled"];
 const CUSTOM = "__custom__";
 
 /** Default order: known statuses in workflow order, then custom ones in the order typed. */
@@ -133,7 +133,7 @@ export async function promptStatuses(): Promise<string[]> {
       ...OPTIONAL_STATUSES.map((s) => ({ value: s as string, label: s })),
       { value: CUSTOM, label: "Add custom statuses…" },
     ],
-    initialValues: ["in-progress"],
+    initialValues: ["ready", "in-progress"],
     required: false,
   });
   if (p.isCancel(chosen)) return cancel();
@@ -155,12 +155,15 @@ export async function promptStatuses(): Promise<string[]> {
     p.log.info(`Creating: ${custom.join(", ")}`);
   }
 
-  let order = orderStatuses(picked, custom);
-  // With only backlog, in-progress and done there is nothing worth ordering.
-  if (order.length >= 4) {
-    const result = await reorderPrompt(order);
-    if (result === null) return cancel();
-    order = result;
-  }
+  // Always shown: the right order is the team's decision, not the tool's. Enter accepts it as is.
+  const order = await reorderPrompt(orderStatuses(picked, custom));
+  if (order === null) return cancel();
   return order;
+}
+
+/** Ask a yes/no question that defaults to yes. Cancelling stops init with nothing changed. */
+export async function confirmYes(message: string): Promise<boolean> {
+  const answer = await p.confirm({ message, initialValue: true });
+  if (p.isCancel(answer)) return cancel();
+  return answer as boolean;
 }

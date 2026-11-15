@@ -17,14 +17,20 @@ import {
   assertIssuesDirIsReal,
   findRoot,
   loadConfig,
+  parseConfig,
+  serializeConfig,
   statusProblems,
 } from "./config.js";
 import { allIds, assertComplete, rel, scan } from "./scan.js";
 import {
   BUG_PREFIX,
+  EFFORT_RE,
+  HANDLE_RE,
   KINDS,
+  LABEL_RE,
   PRIORITIES,
   SEMVER_RE,
+  SIZES,
   SLUG_RE,
   type Kind,
   defaultKind,
@@ -33,19 +39,20 @@ import {
   isValidId,
   nextChild,
   nextTopLevel,
+  normalizeHandle,
   normalizeName,
   parentOf,
   parseFolderName,
   splitIdList,
+  splitList,
   splitPrefix,
-  UNSAFE_ASSIGNEE,
 } from "./ids.js";
 import { parseFrontMatter, setField } from "./frontmatter.js";
 import { commitIssue, TMP_RE, tryRemove } from "./commit.js";
 import { readIssues, parentField } from "./issues.js";
 import { buildRoadmap } from "./roadmap.js";
 import { RELEASES_DIR, ROADMAP_FILE } from "./names.js";
-import { renderIssue } from "./template.js";
+import { renderIssue, renderMaintainRepo, titleFromSlug } from "./template.js";
 import { applyBlocks, planBlocks, renderBlock } from "./block.js";
 import { withLock } from "./lock.js";
 
@@ -56,6 +63,68 @@ export interface InitResult {
   root: string;
   statuses: string[];
   blocks: string[];
+  /** Ignore files that got an `issues/` line. */
+  ignoreFiles: string[];
+  /** The CI workflow file created, relative to the root, or null. */
+  workflow: string | null;
+}
+
+export interface InitOptions {
+  /** Add `issues/` to an existing .npmignore and .dockerignore. Default true. */
+  ignore?: boolean;
+  /** Create the GitHub Action that runs validate on every push. Default true. */
+  ci?: boolean;
+}
+
+/** Ignore files that, when they exist, should list issues/ so it never ships in a package or image. */
+export const IGNORE_FILES = [".npmignore", ".dockerignore"] as const;
+export const WORKFLOW_FILE = ".github/workflows/yardhand.yml";
+
+/** True when an ignore file already has a line that excludes issues/. */
+export const ignoresIssues = (text: string): boolean =>
+  text.split(/\r?\n/).some((l) => /^\/?issues(?:\/(?:\*\*)?)?$/.test(l.trim()));
+
+/** The folder `init` will set up: the existing root if there is one, else the current folder. */
+export function initRoot(cwd: string): string {
+  try {
+    return findRoot(cwd);
+  } catch (err) {
+    if (err instanceof NotInitializedError) return resolve(cwd);
+    throw err;
+  }
+}
+
+/** Ignore files that exist and do not list issues/ yet. These are the ones `init` offers to change. */
+export function ignoreTargets(root: string): string[] {
+  return IGNORE_FILES.filter((name) => {
+    const path = join(root, name);
+    try {
+      return lstatSync(path).isFile() && !ignoresIssues(readFileSync(path, "utf8"));
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** True when `init` should offer the CI workflow: a git repo without the file. */
+export const workflowWanted = (root: string): boolean =>
+  existsSync(join(root, ".git")) && !existsSync(join(root, WORKFLOW_FILE));
+
+export function renderWorkflow(version: string): string {
+  return [
+    `name: ${TOOL}`,
+    "on: [push, pull_request]",
+    "jobs:",
+    "  validate:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/checkout@v4",
+    "      - uses: actions/setup-node@v4",
+    "        with:",
+    "          node-version: 22",
+    `      - run: npx --yes ${TOOL}@${version} validate`,
+    "",
+  ].join("\n");
 }
 
 export function init(
@@ -63,6 +132,7 @@ export function init(
   statuses: string[],
   version: string,
   force = false,
+  opts: InitOptions = {},
 ): InitResult {
   const problems = statusProblems(statuses);
   if (problems.length) throw new YardhandError(problems.join(" "));
@@ -82,7 +152,17 @@ export function init(
     );
   }
   const root = existing ?? resolve(cwd);
-  const config: Config = { statuses };
+  const config: Config = { statuses, labels: [], assignees: {} };
+  // --force replaces the statuses but keeps the labels and assignees already defined.
+  if (existing) {
+    try {
+      const old = parseConfig(readFileSync(join(root, ISSUES_DIR, CONFIG_FILE), "utf8"));
+      config.labels = old.labels;
+      config.assignees = old.assignees;
+    } catch {
+      // An unreadable or invalid old config is being replaced anyway.
+    }
+  }
   assertIssuesDirIsReal(root);
 
   // Plan the AGENTS.md / CLAUDE.md updates first: damaged markers must fail before anything is written.
@@ -97,10 +177,7 @@ export function init(
     assertComplete(scan(root, config));
     const hasCatchAll = allIds(scan(root, config)).includes("000");
 
-    writeFileSync(
-      join(root, ISSUES_DIR, CONFIG_FILE),
-      JSON.stringify(config, null, 2) + "\n",
-    );
+    writeFileSync(join(root, ISSUES_DIR, CONFIG_FILE), serializeConfig(config));
     for (const status of statuses) {
       const dir = join(root, ISSUES_DIR, status);
       mkdirSync(dir, { recursive: true });
@@ -115,17 +192,35 @@ export function init(
       const dir = join(root, ISSUES_DIR, first, folderName("000", "maintain-repo"));
       try {
         mkdirSync(dir);
-        writeFileSync(
-          join(dir, ISSUE_FILE),
-          renderIssue({ id: "000", kind: defaultKind("000"), parent: null, status: first, assignee: "" }),
-          { flag: "wx" },
-        );
+        writeFileSync(join(dir, ISSUE_FILE), renderMaintainRepo(first, TOOL), { flag: "wx" });
       } catch (err) {
         if (errCode(err) !== "EEXIST") throw err;
       }
     }
   });
-  return { root, statuses, blocks: applyBlocks(plan) };
+
+  // Append-only: one "issues/" line at the end of each existing ignore file that lacks it.
+  const ignoreFiles: string[] = [];
+  if (opts.ignore ?? true) {
+    for (const name of ignoreTargets(root)) {
+      const path = join(root, name);
+      const text = readFileSync(path, "utf8");
+      writeFileSync(path, text + (text === "" || text.endsWith("\n") ? "" : "\n") + `${ISSUES_DIR}/\n`);
+      ignoreFiles.push(name);
+    }
+  }
+  // Never overwrites: created only when missing, exclusively.
+  let workflow: string | null = null;
+  if ((opts.ci ?? true) && workflowWanted(root)) {
+    mkdirSync(join(root, ".github", "workflows"), { recursive: true });
+    try {
+      writeFileSync(join(root, WORKFLOW_FILE), renderWorkflow(version), { flag: "wx" });
+      workflow = WORKFLOW_FILE;
+    } catch (err) {
+      if (errCode(err) !== "EEXIST") throw err;
+    }
+  }
+  return { root, statuses, blocks: applyBlocks(plan), ignoreFiles, workflow };
 }
 
 export interface NewOptions {
@@ -134,8 +229,57 @@ export interface NewOptions {
   kind?: string;
   assignee?: string;
   priority?: string;
+  size?: string;
+  labels?: string[];
+  effort?: string;
   dependsOn?: string[];
   related?: string[];
+}
+
+/** Check an assignee typed on the command line: add the @ if missing, then it must be a handle in yardhand.json. */
+export function checkAssignee(input: string, config: Config, notes: string[]): string {
+  const handle = normalizeHandle(input);
+  if (!HANDLE_RE.test(handle)) {
+    throw new YardhandError(`--assignee "${input}" must be a handle: @ then lowercase kebab-case, like @claude-opus (no dots or spaces).`);
+  }
+  if (!config.assignees[handle]) {
+    throw new YardhandError(`--assignee ${handle} is not in ${ISSUES_DIR}/${CONFIG_FILE}. Add it under "assignees" first, like "${handle}": "person" or "model".`);
+  }
+  if (handle !== input.trim()) notes.push(`Assignee normalized: "${input.trim()}" -> ${handle}`);
+  return handle;
+}
+
+/** Check --labels: each must be defined in yardhand.json. Repeats are dropped. */
+export function checkLabels(labels: string[], config: Config): string[] {
+  const out = [...new Set(labels.map((l) => l.trim()).filter(Boolean))];
+  for (const l of out) {
+    if (!LABEL_RE.test(l)) throw new YardhandError(`--labels: "${l}" must be lowercase kebab-case.`);
+    if (!config.labels.includes(l)) {
+      throw new YardhandError(`--labels: "${l}" is not in ${ISSUES_DIR}/${CONFIG_FILE}. Add it to "labels" first.`);
+    }
+  }
+  return out;
+}
+
+export function checkSize(input: string): string {
+  const v = input.trim().toLowerCase();
+  if (!(SIZES as readonly string[]).includes(v)) throw new YardhandError(`--size must be one of: ${SIZES.join(", ")}.`);
+  return v;
+}
+
+export function checkEffort(input: string): string {
+  const v = input.trim();
+  if (!EFFORT_RE.test(v)) throw new YardhandError(`--effort "${v}" must be one word: lowercase letters, digits and dashes, like high or xhigh.`);
+  return v;
+}
+
+/** The warning for effort on an issue no model will pick up, or null. */
+export function effortWarning(id: string, effort: string, assignee: string, config: Config): string | null {
+  if (!effort) return null;
+  if (!assignee) return `${id} has effort but no assignee. Effort only matters for a model.`;
+  const a = config.assignees[assignee];
+  if (a && a.type !== "model") return `${id} has effort but is assigned to a person (${assignee}). Effort only matters for a model.`;
+  return null;
 }
 
 export interface NewResult {
@@ -147,6 +291,8 @@ export interface NewResult {
   status: string;
   /** Things the tool changed or converted for the caller, to print. */
   notes: string[];
+  /** Things that are allowed but probably not intended. */
+  warnings: string[];
 }
 
 export function newIssue(cwd: string, opts: NewOptions): NewResult {
@@ -172,12 +318,10 @@ export function newIssue(cwd: string, opts: NewOptions): NewResult {
   if (!SLUG_RE.test(slug) || slug.startsWith(BUG_PREFIX)) {
     throw new YardhandError(`Slug "${opts.slug}" must be lowercase kebab-case, for example add-auth.`);
   }
-  // Checked on the raw value, before any trimming. Control characters (newlines included),
-  // Unicode line and paragraph separators, and "#" could all change how the file parses.
-  const assignee = opts.assignee ?? "";
-  if (UNSAFE_ASSIGNEE.test(assignee)) {
-    throw new YardhandError("--assignee must be a single line of text and must not contain # or control characters.");
-  }
+  const assignee = opts.assignee === undefined || opts.assignee.trim() === "" ? "" : checkAssignee(opts.assignee, config, notes);
+  const size = opts.size === undefined ? "" : checkSize(opts.size);
+  const labels = checkLabels(opts.labels ?? [], config);
+  const effort = opts.effort === undefined ? "" : checkEffort(opts.effort);
   if (opts.parent !== undefined && !isValidId(opts.parent)) {
     throw new YardhandError(`"${opts.parent}" is not a valid ID.`);
   }
@@ -226,8 +370,12 @@ export function newIssue(cwd: string, opts: NewOptions): NewResult {
           kind,
           parent: opts.parent ?? null,
           status,
-          assignee: assignee.trim(),
+          assignee,
+          title: titleFromSlug(slug),
           priority,
+          size,
+          labels,
+          effort,
           dependsOn,
           related,
         }),
@@ -239,7 +387,8 @@ export function newIssue(cwd: string, opts: NewOptions): NewResult {
       throw err;
     }
     const file = join(dir, ISSUE_FILE);
-    return { id, path: rel(root, file), kind, priority, parent: opts.parent ?? null, status, notes };
+    const warn = effortWarning(id, effort, assignee, config);
+    return { id, path: rel(root, file), kind, priority, parent: opts.parent ?? null, status, notes, warnings: warn ? [warn] : [] };
   });
 }
 
@@ -459,8 +608,43 @@ function collect(root: string, result: CheckResult): void {
         bad(here, "bug-prefix", `The folder name has the "${BUG_PREFIX}" prefix but kind is ${kind}. Run "${TOOL} set ${issue.id} --kind ${kind}" to fix it.`);
       }
     }
-    if (f["assignee"] && UNSAFE_ASSIGNEE.test(f["assignee"])) {
-      bad(here, "assignee", "assignee must be a single line of text and must not contain # or control characters.");
+    const assignee = f["assignee"] ?? "";
+    if (assignee) {
+      if (!HANDLE_RE.test(assignee)) {
+        bad(here, "assignee", `assignee "${assignee}" must be a handle: @ then lowercase kebab-case, like "@claude-opus".`);
+      } else if (!config.assignees[assignee]) {
+        bad(here, "assignee", `assignee ${assignee} is not listed under "assignees" in ${ISSUES_DIR}/${CONFIG_FILE}. Add it there, or fix the spelling.`);
+      } else if (!/^(["']).*\1$/.test(fm.raw["assignee"] ?? "")) {
+        bad(here, "assignee", `assignee must be in quotes, like assignee: "${assignee}" (YAML cannot start a value with @).`);
+      }
+    }
+    const size = f["size"] ?? "";
+    if (size && !(SIZES as readonly string[]).includes(size)) {
+      bad(here, "size", `size "${size}" must be one of: ${SIZES.join(", ")} (or empty).`);
+    }
+    const labels = splitList(f["labels"] ?? "");
+    const rawLabels = (f["labels"] ?? "").replace(/^\[|\]$/g, "").split(",").map((l) => l.trim()).filter(Boolean);
+    if (rawLabels.length !== labels.length) bad(here, "labels", "labels lists the same label more than once.");
+    for (const l of labels) {
+      if (!LABEL_RE.test(l)) bad(here, "labels", `label "${l}" must be lowercase kebab-case.`);
+      else if (!config.labels.includes(l)) bad(here, "labels", `label "${l}" is not listed under "labels" in ${ISSUES_DIR}/${CONFIG_FILE}. Add it there, or fix the spelling.`);
+    }
+    const effort = f["effort"] ?? "";
+    if (effort && !EFFORT_RE.test(effort)) {
+      bad(here, "effort", `effort "${effort}" must be one word: lowercase letters, digits and dashes, like high.`);
+    } else if (issue.id) {
+      const w = effortWarning(issue.id, effort, HANDLE_RE.test(assignee) ? assignee : "", config);
+      if (w) result.warnings.push({ path: here, rule: "effort-no-model", message: w });
+    }
+    if (issue.status === DONE_STATUS) {
+      const open = uncheckedCriteria(text);
+      if (open > 0) {
+        result.warnings.push({
+          path: here,
+          rule: "unchecked-criteria",
+          message: `${issue.id ?? path} is done but has ${open} unchecked acceptance ${open === 1 ? "criterion" : "criteria"}.`,
+        });
+      }
     }
     if (f["released-in"] && !SEMVER_RE.test(f["released-in"])) {
       bad(here, "released-in", `released-in "${f["released-in"]}" is not valid semver.`);
@@ -504,6 +688,22 @@ function collect(root: string, result: CheckResult): void {
       bad(here, "parent", `parent ${parent} does not exist.`);
     } else if (depth(parent) >= known.depth) {
       bad(here, "parent", `parent ${parent} must be at a shallower level than ${known.id}.`);
+    }
+  }
+
+  // Size warnings: size belongs on issues with no children, and a large open issue may need splitting.
+  const parents = new Set(withFields.map((w) => w.fields["parent"]).filter((p): p is string => !!p));
+  for (const { known, fields } of withFields) {
+    const here = `${known.path}/${ISSUE_FILE}`;
+    const size = fields["size"];
+    if (!size) continue;
+    if (parents.has(known.id)) {
+      result.warnings.push({ path: here, rule: "size-on-parent", message: `${known.id} has children, so leave size blank. Its size is its children's.` });
+    } else if (size === "large") {
+      const status = fields["status"];
+      if (status !== DONE_STATUS && status !== "canceled") {
+        result.warnings.push({ path: here, rule: "size-large", message: `${known.id} is large: consider splitting it.` });
+      }
     }
   }
 
@@ -563,4 +763,74 @@ function collect(root: string, result: CheckResult): void {
   } catch {
     // An unreadable roadmap is not worth failing validation over.
   }
+
+  result.warnings.push(...shipRisks(root));
+}
+
+const readText = (path: string): string | null => {
+  try {
+    return lstatSync(path).isFile() ? readFileSync(path, "utf8") : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Warnings when issues/ could end up in a published npm package or a Docker image. Repo-root files only. */
+export function shipRisks(root: string): Problem[] {
+  const out: Problem[] = [];
+  const pkgText = readText(join(root, "package.json"));
+  if (pkgText !== null) {
+    let files: unknown;
+    try {
+      files = (JSON.parse(pkgText) as { files?: unknown } | null)?.files;
+    } catch {
+      files = undefined;
+    }
+    if (Array.isArray(files)) {
+      if (files.some((f) => typeof f === "string" && /^\/?issues(?:\/(?:\*\*?)?)?$/.test(f.trim()))) {
+        out.push({ path: "package.json", rule: "ship-npm", message: `package.json "files" includes ${ISSUES_DIR}/. Remove it so issues are never published.` });
+      }
+    } else {
+      const npmignore = readText(join(root, ".npmignore"));
+      if (npmignore === null || !ignoresIssues(npmignore)) {
+        out.push({
+          path: "package.json",
+          rule: "ship-npm",
+          message: `${ISSUES_DIR}/ could be published by npm. Add "files" to package.json or ${ISSUES_DIR}/ to .npmignore.`,
+        });
+      }
+    }
+  }
+  if (readText(join(root, "Dockerfile")) !== null) {
+    const dockerignore = readText(join(root, ".dockerignore"));
+    if (dockerignore === null || !ignoresIssues(dockerignore)) {
+      out.push({
+        path: "Dockerfile",
+        rule: "ship-docker",
+        message: `${ISSUES_DIR}/ could be copied into a Docker image. Add ${ISSUES_DIR}/ to .dockerignore.`,
+      });
+    }
+  }
+  return out;
+}
+
+const DONE_STATUS = "done";
+
+/** Unchecked boxes with text (`- [ ] something`) under the `## Acceptance criteria` heading, up to the next heading of level 2 or above. */
+export function uncheckedCriteria(text: string): number {
+  const lines = text.split(/\r?\n/);
+  let inside = false;
+  let fence = false;
+  let count = 0;
+  for (const line of lines) {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    if (fence) continue;
+    if (/^#{1,2}\s/.test(line)) {
+      inside = /^##\s+Acceptance criteria\s*$/i.test(line);
+      continue;
+    }
+    // An empty box (the template's placeholder) is not a criterion yet, so it does not count.
+    if (inside && /^\s*[-*+]\s+\[ \]\s+\S/.test(line)) count++;
+  }
+  return count;
 }

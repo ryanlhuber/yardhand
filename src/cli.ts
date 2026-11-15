@@ -1,39 +1,47 @@
 import { parseArgs } from "node:util";
 import pkg from "../package.json";
 import { DEFAULT_STATUSES, findRoot } from "./config.js";
-import { DEPOT_INSTALL, ISSUES_DIR, TOOL } from "./names.js";
+import { ISSUES_DIR, TOOL } from "./names.js";
 import { NotInitializedError, YardhandError } from "./errors.js";
-import { check, init, moveIssue, newIssue } from "./commands.js";
+import { check, ignoreTargets, init, initRoot, moveIssue, newIssue, workflowWanted, WORKFLOW_FILE } from "./commands.js";
 import { setIssue } from "./set.js";
 import { formatTable, listIssues } from "./list.js";
 import { roadmap } from "./roadmap.js";
 import { release } from "./release.js";
-import { promptStatuses } from "./prompts.js";
+import { confirmYes, promptStatuses } from "./prompts.js";
 import * as p from "@clack/prompts";
 
 const USAGE = {
-  init: `${TOOL} init [--yes] [--statuses a,b,c] [--force]
+  init: `${TOOL} init [--yes] [--statuses a,b,c] [--force] [--no-ignore] [--no-ci]
 
   Creates ${ISSUES_DIR}/ with one folder per status. In a terminal it asks which statuses you want and in what order.
-  --yes             use backlog, in-progress, done without asking
+  It also offers to add ${ISSUES_DIR}/ to an existing .npmignore and .dockerignore, and to add a GitHub Action
+  (${WORKFLOW_FILE}) that runs validate on every push. Without questions, both default to yes.
+  --yes             use backlog, ready, in-progress, done without asking
   --statuses a,b,c  use exactly these statuses, in this order (must include backlog and done)
-  --force           overwrite the config of an already initialized repo`,
+  --force           overwrite the statuses of an already initialized repo (labels and assignees are kept)
+  --no-ignore       do not add ${ISSUES_DIR}/ to .npmignore or .dockerignore
+  --no-ci           do not add the GitHub Action`,
   new: `${TOOL} new <slug> [--parent <id>] [--kind feature|task|bug] [--priority urgent|high|medium|low]
-             [--depends-on <ids>] [--related <ids>] [--assignee <name>]
+             [--size small|medium|large] [--labels <names>] [--depends-on <ids>] [--related <ids>]
+             [--assignee @handle] [--effort <word>]
 
   Creates an issue in the first status and prints its ID and path.
   The slug is tidied up for you ("Add Auth" becomes add-auth). A leading "bug-" means --kind bug.
-  Without --kind, level 1 is a feature and deeper levels are tasks.`,
+  Without --kind, level 1 is a feature and deeper levels are tasks.
+  Labels and assignees must be listed in ${ISSUES_DIR}/yardhand.json. The @ on an assignee is added if you leave it off.`,
   move: `${TOOL} move <id> <status>
 
   Moves an issue to another status and rewrites its status field. Status names are tidied up
   ("In Progress" becomes in-progress). Moving to the current status changes nothing.`,
-  set: `${TOOL} set <id> [--kind feature|task|bug] [--priority urgent|high|medium|low|none] [--parent <id>]
-            [--depends-on <ids>|none] [--related <ids>|none] [--assignee <name>|none] [--released-in <semver>|none]
+  set: `${TOOL} set <id> [--kind feature|task|bug] [--priority urgent|high|medium|low|none] [--size small|medium|large|none]
+            [--labels <names>|none] [--parent <id>] [--depends-on <ids>|none] [--related <ids>|none]
+            [--assignee @handle|none] [--effort <word>|none] [--released-in <semver>|none]
 
   Changes fields on an existing issue. A value replaces the old one; "none" clears it.
   Changing --kind renames the folder (adds or removes the bug- prefix). id and status cannot be set here.`,
-  list: `${TOOL} list [--status <name>] [--parent <id>] [--kind feature|task|bug] [--priority urgent|high|medium|low] [--json]
+  list: `${TOOL} list [--status <name>] [--parent <id>] [--kind feature|task|bug] [--priority urgent|high|medium|low]
+            [--size small|medium|large] [--label <name>] [--assignee @handle] [--json]
 
   Lists every issue, most urgent first, then by ID. --parent <id> lists everything under that issue.`,
   roadmap: `${TOOL} roadmap [--stdout]
@@ -65,6 +73,9 @@ let interactive = false;
 const splitList = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
 const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? one : many}`;
 const out = (text: string) => process.stdout.write(text.endsWith("\n") ? text : text + "\n");
+const warn = (warnings: string[]) => {
+  if (warnings.length) process.stderr.write(warnings.map((w) => `Warning: ${w}`).join("\n") + "\n");
+};
 
 /** True when there is no yardhand setup here or above. Any other error (such as an unreadable root) counts as set up. */
 function notSetUp(cwd: string): boolean {
@@ -110,23 +121,34 @@ async function main(argv: string[]): Promise<number> {
           yes: { type: "boolean", short: "y" },
           statuses: { type: "string" },
           force: { type: "boolean" },
+          "no-ignore": { type: "boolean" },
+          "no-ci": { type: "boolean" },
         },
       });
       let statuses: string[];
+      let ignore = !values["no-ignore"];
+      let ci = !values["no-ci"];
       if (values.statuses !== undefined) statuses = splitList(values.statuses);
       else if (values.yes) statuses = DEFAULT_STATUSES;
       else if (process.stdin.isTTY) {
         interactive = true;
         statuses = await promptStatuses();
+        const root = initRoot(cwd);
+        const targets = ignoreTargets(root);
+        if (ignore && targets.length) {
+          ignore = await confirmYes(`Add ${ISSUES_DIR}/ to ${targets.join(" and ")} so it never ships in a package or image?`);
+        }
+        if (ci && workflowWanted(root)) {
+          ci = await confirmYes(`Add a GitHub Action that runs ${TOOL} validate on every push?`);
+        }
       } else throw new YardhandError(`Not a terminal. Use "${TOOL} init --yes" (optionally with --statuses a,b,c).`);
-      const result = init(cwd, statuses, pkg.version, values.force ?? false);
+      const result = init(cwd, statuses, pkg.version, values.force ?? false, { ignore, ci });
       const lines = [
         `Created ${ISSUES_DIR}/ with statuses: ${result.statuses.join(" → ")}`,
         `Updated: ${result.blocks.join(", ")}`,
-        "",
-        "Optional: install Depot's planning and review skills with",
-        `  ${DEPOT_INSTALL}`,
       ];
+      if (result.ignoreFiles.length) lines.push(`Added ${ISSUES_DIR}/ to: ${result.ignoreFiles.join(", ")}`);
+      if (result.workflow) lines.push(`Created ${result.workflow} (runs ${TOOL} validate on every push)`);
       if (interactive) p.outro(lines.join("\n"));
       else out(lines.join("\n"));
       return 0;
@@ -140,6 +162,9 @@ async function main(argv: string[]): Promise<number> {
           kind: { type: "string" },
           assignee: { type: "string" },
           priority: { type: "string" },
+          size: { type: "string" },
+          labels: { type: "string" },
+          effort: { type: "string" },
           "depends-on": { type: "string" },
           related: { type: "string" },
         },
@@ -152,11 +177,15 @@ async function main(argv: string[]): Promise<number> {
         kind: values.kind,
         assignee: values.assignee,
         priority: values.priority,
+        size: values.size,
+        labels: values.labels === undefined ? undefined : splitList(values.labels),
+        effort: values.effort,
         dependsOn: values["depends-on"] === undefined ? undefined : splitList(values["depends-on"]),
         related: values.related === undefined ? undefined : splitList(values.related),
       });
       const summary = [r.kind, r.priority, r.parent ? `parent ${r.parent}` : "", r.status].filter(Boolean).join(" · ");
       out([`${r.id}  ${r.path}`, `${" ".repeat(r.id.length + 2)}${summary}`, ...r.notes].join("\n"));
+      warn(r.warnings);
       return 0;
     }
     case "move": {
@@ -183,6 +212,9 @@ async function main(argv: string[]): Promise<number> {
           "depends-on": { type: "string" },
           related: { type: "string" },
           assignee: { type: "string" },
+          size: { type: "string" },
+          labels: { type: "string" },
+          effort: { type: "string" },
           "released-in": { type: "string" },
         },
       });
@@ -195,12 +227,16 @@ async function main(argv: string[]): Promise<number> {
         dependsOn: values["depends-on"],
         related: values.related,
         assignee: values.assignee,
+        size: values.size,
+        labels: values.labels,
+        effort: values.effort,
         releasedIn: values["released-in"],
       });
-      if (r.unchanged) out("Nothing changed.");
+      if (r.unchanged) out(["Nothing changed.", ...r.notes].join("\n"));
       else {
-        out(`${r.id}  ${r.path}\n${" ".repeat(r.id.length + 2)}${r.changes.map((c) => `${c.field}: ${c.from} -> ${c.to}`).join(" · ")}`);
+        out([`${r.id}  ${r.path}`, `${" ".repeat(r.id.length + 2)}${r.changes.map((c) => `${c.field}: ${c.from} -> ${c.to}`).join(" · ")}`, ...r.notes].join("\n"));
       }
+      warn(r.warnings);
       return 0;
     }
     case "list": {
@@ -212,6 +248,9 @@ async function main(argv: string[]): Promise<number> {
           parent: { type: "string" },
           kind: { type: "string" },
           priority: { type: "string" },
+          size: { type: "string" },
+          label: { type: "string" },
+          assignee: { type: "string" },
           json: { type: "boolean" },
         },
       });

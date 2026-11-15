@@ -137,15 +137,41 @@ export function compareSemver(a: string, b: string): number {
   return 0;
 }
 
-/** Split a comma-separated list of IDs, dropping blanks and repeats. */
-export function splitIdList(value: string): string[] {
+/**
+ * Split a list field into items, dropping blanks and repeats. Accepts the flow-list form written
+ * by 0.3+ (`[a, b]`) and the plain comma-separated form written by 0.2 (`a, b`).
+ */
+export function splitList(value: string): string[] {
+  let v = value.trim();
+  if (v.startsWith("[") && v.endsWith("]")) v = v.slice(1, -1);
   const out: string[] = [];
-  for (const part of value.split(",")) {
-    const id = part.trim();
-    if (id && !out.includes(id)) out.push(id);
+  for (const part of v.split(",")) {
+    const item = part.trim().replace(/^(["'])(.*)\1$/, "$2").trim();
+    if (item && !out.includes(item)) out.push(item);
   }
   return out;
 }
 
-/** Characters that would change how a front-matter line parses: control characters, line/paragraph separators, and "#". */
-export const UNSAFE_ASSIGNEE = new RegExp("[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029#]");
+/** Split a list of IDs (see splitList). */
+export const splitIdList = splitList;
+
+/** How a list field is written in the file: `[a, b]`, or empty for none. */
+export const formatList = (items: string[]): string => (items.length ? `[${items.join(", ")}]` : "");
+
+/** Allowed `size:` values, smallest first. */
+export const SIZES = ["small", "medium", "large"] as const;
+
+/** Label names, like status names: lowercase kebab-case. */
+export const LABEL_RE = SLUG_RE;
+
+/** An assignee handle: `@` then lowercase kebab-case, for people and models alike. */
+export const HANDLE_RE = /^@[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
+/** Add the `@` when it was left off: `claude-opus` becomes `@claude-opus`. */
+export const normalizeHandle = (input: string): string => {
+  const v = input.trim();
+  return v.startsWith("@") ? v : "@" + v;
+};
+
+/** `effort:` is free text but one word, because it may be passed into a shell command. */
+export const EFFORT_RE = /^[a-z0-9][a-z0-9-]*$/;

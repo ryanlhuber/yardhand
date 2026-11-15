@@ -8,4 +8,3 @@ export const ROADMAP_FILE = "ROADMAP.md";
 export const RELEASES_DIR = "releases";
 export const BLOCK_START = `<!-- ${TOOL}:start -->`;
 export const BLOCK_END = `<!-- ${TOOL}:end -->`;
-export const DEPOT_INSTALL = "npx skills@latest add ryanlhuber/depot";

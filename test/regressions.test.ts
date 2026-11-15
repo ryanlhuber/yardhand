@@ -138,10 +138,11 @@ test("duplicate front matter keys fail validation and block moves", () => {
 
 test("new: assignee is a single safe line", () => {
   const root = repo();
+  write(root, "issues/yardhand.json", JSON.stringify({ statuses: STATUSES, assignees: { "@alice-b": "person" } }));
   assert.throws(() => newIssue(root, { slug: "a-one", assignee: "#team" }), /assignee/);
   assert.throws(() => newIssue(root, { slug: "a-two", assignee: "Alice\nstatus: done" }), /assignee/);
-  const { path } = newIssue(root, { slug: "a-three", assignee: " Alice B " });
-  assert.equal(parseFrontMatter(read(root, path))?.fields["assignee"], "Alice B");
+  const { path } = newIssue(root, { slug: "a-three", assignee: " @alice-b " });
+  assert.equal(parseFrontMatter(read(root, path))?.fields["assignee"], "@alice-b");
   assert.deepEqual(validate(root), []);
 });
 
@@ -227,7 +228,7 @@ test("front matter: CRLF files validate, move, and keep their line endings", () 
   assert.deepEqual(validate(root), []);
   moveIssue(root, "001", "in-progress");
   const moved = read(root, "issues/in-progress/001-add-auth/ISSUE.md");
-  assert.match(moved, /status: in-progress\r\n/);
+  assert.match(moved, /status: in-progress +# must match the folder\r\n/);
   assert.ok(!/[^\r]\n/.test(moved), "every newline is still CRLF");
   assert.deepEqual(validate(root), []);
 });

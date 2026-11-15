@@ -26,9 +26,9 @@ test("links: new writes blank priority, depends-on and related by default", () =
   const root = repo();
   const { path } = newIssue(root, { slug: "add-auth" });
   const text = read(root, path);
-  assert.match(text, /\npriority:\n/);
-  assert.match(text, /\ndepends-on:\n/);
-  assert.match(text, /\nrelated:\n/);
+  assert.match(text, /\npriority: +# urgent/);
+  assert.match(text, /\ndepends-on: +# issue IDs/);
+  assert.match(text, /\nrelated: +# issue IDs/);
   assert.deepEqual(validate(root), []);
   rmSync(root, { recursive: true, force: true });
 });
@@ -45,8 +45,8 @@ test("links: new stores priority, depends-on and related", () => {
   });
   const f = fields(root, path);
   assert.equal(f["priority"], "high");
-  assert.equal(f["depends-on"], "001, 002");
-  assert.equal(f["related"], "001");
+  assert.equal(f["depends-on"], "[001, 002]");
+  assert.equal(f["related"], "[001]");
   assert.deepEqual(validate(root), []);
   rmSync(root, { recursive: true, force: true });
 });
@@ -143,8 +143,8 @@ test("links: CLI new accepts --priority, --depends-on and --related", () => {
   assert.equal(r.status, 0, r.stderr);
   const f = fields(root, r.stdout.trim().split(/\s+/)[1]!);
   assert.equal(f["priority"], "urgent");
-  assert.equal(f["depends-on"], "001, 002");
-  assert.equal(f["related"], "001");
+  assert.equal(f["depends-on"], "[001, 002]");
+  assert.equal(f["related"], "[001]");
   assert.equal(run("new", "bad", "--priority", "asap").status, 1);
   assert.equal(run("validate").stdout.trim(), "OK");
   rmSync(root, { recursive: true, force: true });
