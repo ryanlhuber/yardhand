@@ -34,7 +34,8 @@ issues/
   "assignees": {
     "@ryan": "person",
     "@claude-opus": { "type": "model", "run": "claude -p --model opus \"Build {{issue}}\"" }
-  }
+  },
+  "agents": ["claude-code", "codex"]
 }
 ```
 
@@ -46,7 +47,8 @@ issues/
 - `backlog` means unrefined, `ready` means refined and safe to build, `in-progress` means claimed. `ready` is not required, but the "Picking up work" convention assumes it.
 - `labels`: optional list of allowed label names, lowercase kebab-case, unique. Missing means none.
 - `assignees`: optional map of handle to `"person"` or `"model"`, or to an object `{ "type": "person" | "model", "run": "<command template>" }`. Handles are `@` plus lowercase kebab-case: `^@[a-z][a-z0-9]*(-[a-z0-9]+)*$` (no dots: `@gpt-6-1-sol`). `run` is kept for a future `run` command and is not used yet. Missing means none.
-- `labels` and `assignees` are edited by hand. No emails, here or in issues.
+- `agents`: the AI tools that work in this repo, any of `claude-code`, `codex`, `opencode`, `other` (any tool that reads `AGENTS.md` or `.agents/skills`). `[]` means AI is off. Missing (a config from before 0.4) means AI is on with `AGENTS.md` only. Set by `init`; to change it, edit the list and run `yardhand init --force`. See "AI tools".
+- `labels`, `assignees` and `agents` are edited by hand. No emails, here or in issues.
 
 ## IDs
 
@@ -115,7 +117,7 @@ released-in:        # set by `release`
 - `assignee`: optional. A handle listed under `assignees` in `yardhand.json`, written in quotes (`assignee: "@claude-opus"`) because YAML cannot start a value with `@`. People and models use the same form.
 - `effort`: optional. How hard the assigned model should think, in that model's own words. Free text, but one word: `^[a-z0-9][a-z0-9-]*$` (it may be passed into a shell command).
 - `released-in`: optional semver (the grammar at semver.org: no leading zeros, no empty identifiers), set by `yardhand release` when shipped.
-- Blank means unset for every optional field. The template writes them all, blank. Only `parent` is omitted, for level 1.
+- Blank means unset for every optional field. The template writes them all, blank. Only `parent` is omitted, for level 1, and `effort` when AI is off (`"agents": []`) and no effort was given. A missing optional field means the same as a blank one; `set` adds it when needed.
 - Lists are written `[a, b]`. The 0.2 form (`a, b`) is still read. Command flags take comma-separated values.
 - The `# Required` and `# Optional (blank = unset)` lines and the comment after each field are for people editing by hand. `validate` does not check them or the field order. Every command that edits front matter (`set`, `move`, `release`) changes only the value on the matching line and keeps its comment in the same column.
 - The body starts with an H1 title, seeded by `new` from the slug without `bug-`, in sentence case (`add-login-form` becomes `Add login form`). It can be edited freely and is never checked against the slug.
@@ -143,11 +145,12 @@ Interactive by default, in a terminal:
 1. **Pick statuses.** A space-bar checklist: `triage`, `ready` (pre-checked), `in-progress` (pre-checked), `review`, `merge-ready`, `blocked`, `canceled`, and "Add custom statuses...". `backlog` and `done` are always included. (`ready` replaced `todo` in 0.3.0.)
 2. **Custom statuses** (only if chosen). Free-form names separated by commas (semicolons also work), normalized (`Review 1` becomes `review-1`), shown as `Creating: ...`. Empty names, duplicates, `backlog`, `done`, `releases` and names with other characters are rejected.
 3. **Order** (always shown, so the team sets the order). A numbered list; nothing is pinned. Up/Down moves the cursor, space grabs or drops a status, while grabbed Up/Down moves it and a digit key (1-9) jumps it to that slot, Enter confirms. The starting order is `triage`, `backlog`, `ready`, `in-progress`, `review`, `merge-ready`, `blocked`, `done`, `canceled`, then custom statuses in the order typed.
-4. **Ignore entries** (only if `.npmignore` or `.dockerignore` exists at the root without an `issues/` line). Asks `Add issues/ to ... so it never ships in a package or image?`, default yes.
-5. **CI check** (only in a git repo without `.github/workflows/yardhand.yml`). Asks `Add a GitHub Action that runs yardhand validate on every push?`, default yes.
-6. **Create** everything and print the final order and what was created.
+4. **AI tools.** A checklist: "Which AI tools will work in this repo?" with Claude Code, Codex, OpenCode, and "Other (reads AGENTS.md or .agents/skills)". Pre-checked: the `agents` already in `yardhand.json`, else the tools whose files are in the repo (`CLAUDE.md` or `.claude/` for Claude Code, `.codex/` for Codex, `.opencode/` or `opencode.json` for OpenCode, and Other when only `AGENTS.md` or `.agents/` is there). Picking none turns AI off. See "AI tools".
+5. **Ignore entries** (only if `.npmignore` or `.dockerignore` exists at the root without an `issues/` line). Asks `Add issues/ to ... so it never ships in a package or image?`, default yes.
+6. **CI check** (only in a git repo without `.github/workflows/yardhand.yml`). Asks `Add a GitHub Action that runs yardhand validate on every push?`, default yes.
+7. **Create** everything and print the final order and what was created.
 
-Non-interactive: `yardhand init --yes [--statuses a,b,c] [--no-ignore] [--no-ci]`. Defaults to `backlog,ready,in-progress,done`. `--statuses` is taken as the order and must already be valid (no normalization). Steps 4 and 5 default to yes; `--no-ignore` and `--no-ci` skip them.
+Non-interactive: `yardhand init --yes [--statuses a,b,c] [--agents a,b|none] [--no-ignore] [--no-ci]`. Defaults to `backlog,ready,in-progress,done`. `--statuses` is taken as the order and must already be valid (no normalization). `--agents` takes `claude-code`, `codex`, `opencode`, `other`, or `none` to turn AI off; without it, `init` uses the `agents` already in `yardhand.json`, else the tools found in the repo, else `other` (the `AGENTS.md` block only, as before 0.4). Steps 5 and 6 default to yes; `--no-ignore` and `--no-ci` skip them.
 
 Ignore entries are append-only: one `issues/` line at the end of each existing file that lacks one. `init` never creates those files, never edits other lines, and never touches `.gitignore` (issues stay committed). The workflow is created exclusively and never overwritten:
 
@@ -167,7 +170,7 @@ jobs:
 
 `<version>` is the version that ran `init`, so CI never changes behavior on its own.
 
-Creates `issues/`, `issues/yardhand.json` (with empty `labels` and `assignees`), and one folder per status (with a `.gitkeep` in each empty one). Creates the catch-all `000-maintain-repo` issue in `backlog` (even when another status comes first) when no `000` issue exists, so `000.NN` children (maintenance, bugs with no clear home) have a parent. Its description explains its use, says it is never moved to `done`, and it has no checkboxes. Adds or updates the Yardhand block in `AGENTS.md`, and in `CLAUDE.md` if that file exists. Prints no suggestions for other tools. Refuses to overwrite an existing `yardhand.json` unless `--force`; with `--force` it replaces the statuses and keeps the labels and assignees. It takes the same lock as `new` and `move`, and runs the same completeness check, so a status list that omits a folder holding issues, or a tree it cannot fully read, is refused before anything is written. The catch-all is created with exclusive operations and is never overwritten. If `issues/` exists but cannot be read, `init` fails; it only starts fresh when nothing is set up. It validates `--statuses` even when it is empty.
+Creates `issues/`, `issues/yardhand.json` (with empty `labels` and `assignees`), and one folder per status (with a `.gitkeep` in each empty one). Creates the catch-all `000-maintain-repo` issue in `backlog` (even when another status comes first) when no `000` issue exists, so `000.NN` children (maintenance, bugs with no clear home) have a parent. Its description explains its use, says it is never moved to `done`, and it has no checkboxes. Writes the AI files for the chosen tools (see "AI tools"). Prints no suggestions for other tools. Refuses to overwrite an existing `yardhand.json` unless `--force`; with `--force` it replaces the statuses and keeps the labels and assignees (and the agents, unless `--agents` or the checklist says otherwise). It takes the same lock as `new` and `move`, and runs the same completeness check, so a status list that omits a folder holding issues, or a tree it cannot fully read, is refused before anything is written. The catch-all is created with exclusive operations and is never overwritten. If `issues/` exists but cannot be read, `init` fails; it only starts fresh when nothing is set up. It validates `--statuses` even when it is empty.
 
 ### `yardhand new <slug> [--parent <id>] [--kind feature|task|bug] [--priority urgent|high|medium|low] [--size small|medium|large] [--labels <names>] [--depends-on <ids>] [--related <ids>] [--assignee @handle] [--effort <word>]`
 
@@ -227,6 +230,7 @@ Warnings:
 - `size: large` on an issue not in `done` or `canceled`: consider splitting it.
 - An issue in `done` with unchecked acceptance criteria (`- [ ]` followed by text, under `## Acceptance criteria`, outside code blocks).
 - `effort` set when the assignee is blank or a person.
+- AI is off (`"agents": []`) and an issue sets `effort` or is assigned to a model.
 - `issues/` could ship: `package.json` has no `files` field and `.npmignore` has no `issues/` line; `package.json` `files` includes `issues/`; or a `Dockerfile` exists and `.dockerignore` has no `issues/` line. Only files at the repo root are checked. Hosting settings cannot be seen from the repo and are not checked.
 
 `--json` prints `{ "ok": true|false, "errors": [...], "warnings": [...] }`, each entry having `path`, `rule` and `message`. A done issue without `released-in` is not flagged.
@@ -239,6 +243,33 @@ With no command: if stdin and stdout are both a terminal and no `issues/yardhand
 
 0 success, 1 validation or usage error.
 
+## AI tools
+
+AI is optional. With `"agents": []` yardhand writes nothing about AI: no block, no skills, and no `effort` line in new issues. Everything else (statuses, IDs, `ready`, refinement, CI) works the same.
+
+With one or more tools, `init` writes:
+
+| Tool | Files |
+|---|---|
+| Any | The Yardhand block in `AGENTS.md` (created if missing) |
+| Codex, OpenCode, Other | The skills in `.agents/skills/yardhand-<name>/SKILL.md` |
+| Claude Code | The skills in `.claude/skills/yardhand-<name>/SKILL.md`, and `CLAUDE.md`: the block in an existing file, unless it already imports `AGENTS.md` with an `@AGENTS.md` line (then it is left alone, so the rules are not read twice); a missing file is created with just `@AGENTS.md` |
+
+Codex reads `.agents/skills`, OpenCode reads `.agents/skills`, `.opencode/skills` and `.claude/skills`, and Claude Code reads `.claude/skills`. So one folder covers the other tools, and Claude Code gets its own copy.
+
+The skills follow the Agent Skills format (front matter with `name` matching the folder, and `description`):
+
+| Skill | Does |
+|---|---|
+| `yardhand-plan` | Turns a goal or bug report into level 1/2/3 issues with `new`. Writes no code. |
+| `yardhand-refine` | Takes a `backlog` issue to `ready`: split, criteria, size, fields, `validate`, move. Writes no code. |
+| `yardhand-build` | The "Picking up work" steps. |
+| `yardhand-review` | Checks the change against the acceptance criteria. Never reviews an issue it built. On failure, adds `## Review notes` and moves the issue back to `in-progress`. |
+
+Each skill says to use the CLI when the repo has it and to follow the block's rules by hand otherwise. The files are generated from one template and the CLI version, are plain copies (not symlinks), and carry a `<!-- Generated by yardhand ... -->` line. `init` only replaces or removes files with that line: a hand-written file at the same path is left alone and reported. When a tool is dropped (edit `agents`, run `init --force`), the generated skills in a folder no remaining tool reads are removed, and folders left empty go with them. Blocks already in `AGENTS.md` or `CLAUDE.md` are never removed.
+
+**Existing instructions.** The block covers issue tracking only, and says so in its first line: for anything else, the rest of the file wins. Where both cover the same thing, the repo's rule wins: branches are named `<id>-<slug>` unless the repo has its own branch naming rule, in which case that rule is followed and the issue ID goes in the branch name. After writing, `init` prints a warning for each line outside the block in `AGENTS.md` or `CLAUDE.md` that names another tracker (Linear, Jira, GitHub Issues, Asana, Trello, Shortcut) or a branch naming rule. It never changes those lines.
+
 ## Generated block in AGENTS.md
 
 Written between markers so `init` can update it:
@@ -250,7 +281,7 @@ Written between markers so `init` can update it:
 <!-- yardhand:end -->
 ```
 
-Content outside the markers is kept byte for byte, including when the block is appended and including bytes that are not valid UTF-8. Markers are found by plain text search anywhere in the file, so do not put the literal marker lines in your own text (for example in a fenced example); a pair there would be treated as the block. If the markers are damaged (one missing, reversed, or repeated), `init` fails and changes nothing, and it checks this before writing anything else. The block is generated from `yardhand.json` and the CLI version. It states: where issues live; the status words in order; the ID rules; use the commands for IDs, status changes and front matter, or follow the rules exactly by hand; the commands to use (`new`, `move`, `set`, `list`, `roadmap`, `release`); the field rules; the "Picking up work" convention; run `yardhand validate` before finishing; and the vocabulary mapping for Depot (level 1 is what Depot's skills call an epic, level 3 is a work item). Content outside the markers is never touched.
+Content outside the markers is kept byte for byte, including when the block is appended and including bytes that are not valid UTF-8. Markers are found by plain text search anywhere in the file, so do not put the literal marker lines in your own text (for example in a fenced example); a pair there would be treated as the block. If the markers are damaged (one missing, reversed, or repeated), `init` fails and changes nothing, and it checks this before writing anything else. The block is generated from `yardhand.json` and the CLI version. It states: that it covers issue tracking only and the rest of the file wins for anything else; where issues live; the status words in order; the ID rules; use the commands for IDs, status changes and front matter, or follow the rules exactly by hand; the commands to use (`new`, `move`, `set`, `list`, `roadmap`, `release`); the field rules; the "Picking up work" convention; the skills and where they are; run `yardhand validate` before finishing; and the vocabulary mapping for Depot (level 1 is what Depot's skills call an epic, level 3 is a work item). Content outside the markers is never touched.
 
 ## Name constants
 
@@ -258,7 +289,7 @@ The tool name, config filename, issues folder name, issue filename, roadmap file
 
 ## Out of v1
 
-`status add|rename|remove`, the frontend, a dev-dependency prompt, a harness picker, `validate --fix`, single-issue `validate`, and `run` (an optional command that would follow "Picking up work" and launch the assigned model with its `run` template).
+`status add|rename|remove`, the frontend, a dev-dependency prompt, `validate --fix`, single-issue `validate`, and `run` (an optional command that would follow "Picking up work" and launch the assigned model with its `run` template).
 
 ## Picking up work
 
@@ -266,7 +297,7 @@ The same steps for a person, a model, a script, or a future `run` command:
 
 1. Take an issue from `ready` whose `depends-on` issues are all `done`. Highest priority first, then lowest ID.
 2. Claim it: move it to `in-progress` and set `assignee` to yourself.
-3. Build it on a branch named `<id>-<slug>`.
+3. Build it on a branch named `<id>-<slug>`. If the repo has its own branch naming rule, follow it and put the issue ID in the branch name.
 4. Tick the acceptance criteria, then move it to `review` if that status exists, else `done`.
 
 Nothing starts a build automatically. Moving an issue to `in-progress` claims it; it never launches anything.

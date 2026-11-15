@@ -67,6 +67,7 @@ test("init: creates statuses, config, 000, and the AGENTS.md block", () => {
     statuses: ["backlog", "review-1", "merge-ready", "done"],
     labels: [],
     assignees: {},
+    agents: ["other"],
   });
   for (const s of ["backlog", "review-1", "merge-ready", "done"]) {
     assert.ok(existsSync(join(root, "issues", s)), s);
@@ -77,7 +78,7 @@ test("init: creates statuses, config, 000, and the AGENTS.md block", () => {
   assert.doesNotMatch(catchAll, /- \[ \]/, "the catch-all has no checkboxes");
   assert.doesNotMatch(catchAll, /^parent:/m);
   assert.match(read(root, "AGENTS.md"), /backlog → review-1 → merge-ready → done/);
-  assert.ok(!existsSync(join(root, "CLAUDE.md")), "CLAUDE.md is only updated if it exists");
+  assert.ok(!existsSync(join(root, "CLAUDE.md")), "CLAUDE.md is only touched when Claude Code is set up");
   assert.deepEqual(validate(root), []);
 });
 

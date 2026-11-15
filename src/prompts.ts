@@ -2,6 +2,8 @@ import { emitKeypressEvents } from "node:readline";
 import * as p from "@clack/prompts";
 import { RELEASES_DIR, TOOL } from "./names.js";
 import { STATUS_RE, normalizeName } from "./ids.js";
+import { AGENTS, type Agent } from "./config.js";
+import { AGENT_LABELS } from "./agents.js";
 
 /** Statuses offered in the checklist, in their default workflow order. `backlog` and `done` are always included. */
 export const OPTIONAL_STATUSES = ["triage", "ready", "in-progress", "review", "merge-ready", "blocked", "canceled"] as const;
@@ -166,4 +168,16 @@ export async function confirmYes(message: string): Promise<boolean> {
   const answer = await p.confirm({ message, initialValue: true });
   if (p.isCancel(answer)) return cancel();
   return answer as boolean;
+}
+
+/** Ask which AI tools will work in the repo. `checked` are pre-selected. Nothing picked turns AI off. */
+export async function promptAgents(checked: Agent[]): Promise<Agent[]> {
+  const answer = await p.multiselect({
+    message: "Which AI tools will work in this repo? (pick none to leave AI out)",
+    options: AGENTS.map((a) => ({ value: a as string, label: AGENT_LABELS[a] })),
+    initialValues: checked,
+    required: false,
+  });
+  if (p.isCancel(answer)) return cancel();
+  return answer as Agent[];
 }

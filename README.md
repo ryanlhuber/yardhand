@@ -24,7 +24,7 @@ Nothing is installed into your project. `init` writes plain files only.
 
 | Command | What it does |
 |---|---|
-| `yardhand init` | Sets up tracking in this repo: creates `issues/`, `issues/yardhand.json`, one folder per status, the `000-maintain-repo` issue (in `backlog`), and a rules block in `AGENTS.md` (and `CLAUDE.md` if present). Asks which statuses to use (`ready` and `in-progress` are pre-checked), lets you add custom ones (typed freely, normalized to `kebab-case`), then always lets you reorder them. `backlog` and `done` are always included but can sit anywhere in the order. It then offers to add `issues/` to an existing `.npmignore` and `.dockerignore`, and, in a git repo, to add `.github/workflows/yardhand.yml`, a GitHub Action that runs `validate` on every push. |
+| `yardhand init` | Sets up tracking in this repo: creates `issues/`, `issues/yardhand.json`, one folder per status, and the `000-maintain-repo` issue (in `backlog`). Asks which statuses to use (`ready` and `in-progress` are pre-checked), lets you add custom ones (typed freely, normalized to `kebab-case`), then always lets you reorder them. `backlog` and `done` are always included but can sit anywhere in the order. Then asks which AI tools work in the repo (pick none to leave AI out; see [AI tools](#ai-tools-optional)). It then offers to add `issues/` to an existing `.npmignore` and `.dockerignore`, and, in a git repo, to add `.github/workflows/yardhand.yml`, a GitHub Action that runs `validate` on every push. |
 | `yardhand init --yes --statuses a,b,c` | Same, without questions. `--statuses` sets your statuses in order (default `backlog,ready,in-progress,done`). The ignore entries and the GitHub Action default to yes; skip them with `--no-ignore` and `--no-ci`. Add `--force` to re-run in a repo that is already set up (labels and assignees are kept). |
 | `yardhand new <slug>` | Creates an issue with the next free ID in the first status and prints its ID and path. The slug is normalized to lowercase kebab-case; start it with a verb, like `add-auth`. A level-1 issue is a `feature`, deeper ones are `task`. |
 | `yardhand new <slug> --parent 017` | Creates a child of `017` (it gets `017.01`, or the next free number). Also accepts `--kind feature\|task\|bug`. A slug starting with `bug-` makes a bug. |
@@ -35,7 +35,7 @@ Nothing is installed into your project. `init` writes plain files only.
 | `yardhand list` | Shows every issue in every status, sorted by priority then ID. Filters: `--status`, `--parent`, `--kind`, `--priority`, `--size`, `--label`, `--assignee`. Add `--json` for scripts. |
 | `yardhand roadmap` | Writes `issues/ROADMAP.md`, a tree of every issue built from `parent:` fields, with done counts, sizes, and how many large issues are left. `--stdout` prints it instead. |
 | `yardhand release <version>` | Stamps `released-in:` on every issue in `done` that has none and writes `issues/releases/<version>.md`. `--dry-run` previews. |
-| `yardhand validate` | Checks every issue and reports each problem with its path. Exits `1` if anything is wrong, so it works in CI. `--json` for scripts. Warns (without failing) about long slugs, a stale `ROADMAP.md`, `size` on a parent, open `large` issues (consider splitting), done issues with unchecked acceptance criteria, `effort` with no model assigned, and `issues/` that could be published by npm or copied into a Docker image. |
+| `yardhand validate` | Checks every issue and reports each problem with its path. Exits `1` if anything is wrong, so it works in CI. `--json` for scripts. Warns (without failing) about long slugs, a stale `ROADMAP.md`, `size` on a parent, open `large` issues (consider splitting), done issues with unchecked acceptance criteria, `effort` with no model assigned, `effort` or a model assignee when AI is off, and `issues/` that could be published by npm or copied into a Docker image. |
 | `yardhand <command> --help`, `--version` | Prints usage for a command, or the installed version. |
 
 ## Layout
@@ -74,15 +74,30 @@ An issue's status is the folder it is in. `backlog` means not refined yet; `read
   "assignees": {
     "@ryan": "person",
     "@claude-opus": "model"
-  }
+  },
+  "agents": ["claude-code", "codex"]
 }
 ```
 
-Edit `labels` and `assignees` by hand. Labels are lowercase kebab-case. Handles are `@` plus lowercase kebab-case, with no dots: GPT-6.1 Sol is `@gpt-6-1-sol`. Never put emails here or in an issue; repos can be public.
+Edit `labels`, `assignees` and `agents` by hand. Labels are lowercase kebab-case. Handles are `@` plus lowercase kebab-case, with no dots: GPT-6.1 Sol is `@gpt-6-1-sol`. Never put emails here or in an issue; repos can be public.
 
 ### Keep issues out of packages and live sites
 
 A normal build (Vite, Next, `tsc`) only outputs its build folder, so `issues/` stays out. It can leak through `npm publish` without a `files` list, a Docker `COPY . .` without a `.dockerignore` entry, or a host that serves the repo root. `init` offers the ignore entries and `validate` warns about the first two. Deploy from your build output folder, never the repo root.
+
+## AI tools (optional)
+
+Yardhand works the same with or without AI. `init` asks "Which AI tools will work in this repo?" and pre-checks the ones whose files it finds (`CLAUDE.md` or `.claude/`, `.codex/`, `.opencode/`). Pick none and nothing about AI is written: no rules block, no skills, and no `effort:` line in new issues. Scripts use `--agents claude-code,codex` or `--agents none`.
+
+Pick one or more and `init` writes:
+
+- A rules block in `AGENTS.md`, between `<!-- yardhand:start -->` and `<!-- yardhand:end -->`. Nothing outside the markers changes.
+- Four skills: `yardhand-plan` (turn a goal into issues), `yardhand-refine` (get an issue to `ready`), `yardhand-build` (pick up and build an issue), and `yardhand-review` (check the work against the acceptance criteria; never reviews its own work). They go in `.agents/skills/` for Codex, OpenCode and other tools, and in `.claude/skills/` for Claude Code.
+- For Claude Code, the block in `CLAUDE.md`. If your `CLAUDE.md` already has an `@AGENTS.md` line, it is left alone; if there is no `CLAUDE.md`, one is created with just that line.
+
+The choice is saved as `agents` in `issues/yardhand.json` (`[]` means AI is off). To change it, edit the list and run `yardhand init --force`. Skills for a tool you dropped are removed; only files yardhand generated are ever replaced or removed.
+
+Already have an `AGENTS.md`? The yardhand block only covers issue tracking, and says the rest of your file wins for anything else. Your branch naming rule wins over yardhand's (keep the issue ID in the branch name). `init` prints a warning for any line that mentions another tracker (Linear, Jira, GitHub Issues) or a branch naming rule, and leaves those lines for you to decide.
 
 ## Numbering
 
@@ -151,8 +166,13 @@ The same steps for a person, a model, or a script:
 
 1. Take an issue from `ready` whose `depends-on` issues are all `done`. Highest priority first, then lowest ID (`yardhand list --status ready`).
 2. Claim it: move it to `in-progress` and set `assignee` to yourself.
-3. Build it on a branch named `<id>-<slug>`.
+3. Build it on a branch named `<id>-<slug>` (or your repo's own branch rule, with the issue ID in the name).
 4. Tick the acceptance criteria, then move it to `review` if that status exists, else `done`.
+
+## Upgrading from 0.3
+
+- Nothing breaks: a `yardhand.json` without `agents` works as before (the `AGENTS.md` block only).
+- To pick your AI tools and get the skills, run `yardhand init --force --statuses <your current statuses, in order> --agents claude-code,codex` (or `--agents none`). Without `--agents`, it sets up the tools it finds in the repo. It keeps your labels and assignees.
 
 ## Upgrading from 0.2
 

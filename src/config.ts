@@ -18,7 +18,19 @@ export interface Config {
   labels: string[];
   /** Assignee handles (like `@ryan`, `@claude-opus`) and what each one is. */
   assignees: Record<string, Assignee>;
+  /**
+   * AI tools that work in this repo. An empty list means AI is off. Missing (configs written
+   * before this field existed) means AI is on with AGENTS.md only, as before.
+   */
+  agents?: Agent[];
 }
+
+/** AI tools `init` can set up. "other" means any tool that reads AGENTS.md or .agents/skills. */
+export const AGENTS = ["claude-code", "codex", "opencode", "other"] as const;
+export type Agent = (typeof AGENTS)[number];
+
+/** True unless the config turns AI off with an empty "agents" list. */
+export const aiOn = (config: Config): boolean => config.agents === undefined || config.agents.length > 0;
 
 export const DEFAULT_STATUSES = ["backlog", "ready", "in-progress", "done"];
 
@@ -57,6 +69,22 @@ export function labelProblems(labels: unknown): string[] {
   return out;
 }
 
+/** Problems with the agents list, empty when valid. A missing list is fine. */
+export function agentProblems(agents: unknown): string[] {
+  if (agents === undefined) return [];
+  if (!Array.isArray(agents) || agents.some((a) => typeof a !== "string")) {
+    return [`"agents" must be an array, like ["claude-code", "codex"], or [] for no AI.`];
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const a of agents as string[]) {
+    if (!(AGENTS as readonly string[]).includes(a)) out.push(`Agent "${a}" must be one of: ${AGENTS.join(", ")}.`);
+    if (seen.has(a)) out.push(`Agent "${a}" appears more than once.`);
+    seen.add(a);
+  }
+  return out;
+}
+
 const isType = (t: unknown): t is AssigneeType => t === "person" || t === "model";
 
 /** Problems with the assignees map, empty when valid. A missing map means no assignees. */
@@ -87,21 +115,30 @@ export function parseConfig(text: string): Config {
   } catch {
     throw new YardhandError(`${CONFIG_FILE} is not valid JSON.`);
   }
-  const obj = (data ?? {}) as { statuses?: unknown; labels?: unknown; assignees?: unknown };
-  const problems = [...statusProblems(obj.statuses), ...labelProblems(obj.labels), ...assigneeProblems(obj.assignees)];
+  const obj = (data ?? {}) as { statuses?: unknown; labels?: unknown; assignees?: unknown; agents?: unknown };
+  const problems = [
+    ...statusProblems(obj.statuses),
+    ...labelProblems(obj.labels),
+    ...assigneeProblems(obj.assignees),
+    ...agentProblems(obj.agents),
+  ];
   if (problems.length) throw new YardhandError(`${CONFIG_FILE}: ${problems.join(" ")}`);
   const assignees: Record<string, Assignee> = Object.create(null);
   for (const [handle, value] of Object.entries((obj.assignees ?? {}) as Record<string, unknown>)) {
     assignees[handle] = isType(value) ? { type: value } : (value as Assignee);
   }
-  return { statuses: obj.statuses as string[], labels: (obj.labels as string[] | undefined) ?? [], assignees };
+  const config: Config = { statuses: obj.statuses as string[], labels: (obj.labels as string[] | undefined) ?? [], assignees };
+  if (obj.agents !== undefined) config.agents = obj.agents as Agent[];
+  return config;
 }
 
 /** The JSON written to yardhand.json. Assignees keep the short "person"/"model" form unless they carry more. */
 export function serializeConfig(config: Config): string {
   const assignees: Record<string, unknown> = {};
   for (const [handle, a] of Object.entries(config.assignees)) assignees[handle] = a.run === undefined ? a.type : a;
-  return JSON.stringify({ statuses: config.statuses, labels: config.labels, assignees }, null, 2) + "\n";
+  const data: Record<string, unknown> = { statuses: config.statuses, labels: config.labels, assignees };
+  if (config.agents !== undefined) data["agents"] = config.agents;
+  return JSON.stringify(data, null, 2) + "\n";
 }
 
 /** issues/ must be a real folder. Yardhand never follows a symlink there. */

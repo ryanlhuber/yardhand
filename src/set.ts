@@ -20,7 +20,7 @@ import {
   splitIdList,
   splitList,
 } from "./ids.js";
-import { checkAssignee, checkEffort, checkLabels, checkSize, effortWarning } from "./commands.js";
+import { aiOffWarning, checkAssignee, checkEffort, checkLabels, checkSize, effortWarning } from "./commands.js";
 import { quoteHandle } from "./template.js";
 
 export interface SetOptions {
@@ -182,8 +182,12 @@ export function setIssue(cwd: string, id: string, opts: SetOptions): SetResult {
     }
     const finalAssignee = next["assignee"] ?? current["assignee"] ?? "";
     const finalEffort = next["effort"] ?? current["effort"] ?? "";
-    const warn = next["assignee"] !== undefined || next["effort"] !== undefined ? effortWarning(id, finalEffort, finalAssignee, config) : null;
-    const warnings = warn ? [warn] : [];
+    const touched = next["assignee"] !== undefined || next["effort"] !== undefined;
+    const warnings = touched
+      ? [effortWarning(id, finalEffort, finalAssignee, config), aiOffWarning(id, finalEffort, finalAssignee, config)].filter(
+          (w): w is string => w !== null,
+        )
+      : [];
     if (changes.length === 0 && destDir === undefined) return { id, path: here, changes, unchanged: true, notes, warnings };
 
     let updated = text;

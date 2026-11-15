@@ -13,7 +13,9 @@ import { join, resolve } from "node:path";
 import { YardhandError, NotInitializedError } from "./errors.js";
 import { CONFIG_FILE, ISSUES_DIR, ISSUE_FILE, TOOL } from "./names.js";
 import {
+  type Agent,
   type Config,
+  aiOn,
   assertIssuesDirIsReal,
   findRoot,
   loadConfig,
@@ -54,6 +56,7 @@ import { buildRoadmap } from "./roadmap.js";
 import { RELEASES_DIR, ROADMAP_FILE } from "./names.js";
 import { renderIssue, renderMaintainRepo, titleFromSlug } from "./template.js";
 import { applyBlocks, planBlocks, renderBlock } from "./block.js";
+import { applySkills, defaultAgents, findConflicts, planSkills } from "./agents.js";
 import { withLock } from "./lock.js";
 
 const errCode = (err: unknown) => (err as NodeJS.ErrnoException).code ?? "error";
@@ -67,6 +70,12 @@ export interface InitResult {
   ignoreFiles: string[];
   /** The CI workflow file created, relative to the root, or null. */
   workflow: string | null;
+  /** The AI tools set up. Empty means AI is off. */
+  agents: Agent[];
+  /** Skill files written and removed, relative to the root. */
+  skills: { written: string[]; removed: string[]; skipped: string[] };
+  /** Lines in AGENTS.md or CLAUDE.md that may conflict with yardhand. Reported, never changed. */
+  conflicts: string[];
 }
 
 export interface InitOptions {
@@ -74,6 +83,11 @@ export interface InitOptions {
   ignore?: boolean;
   /** Create the GitHub Action that runs validate on every push. Default true. */
   ci?: boolean;
+  /**
+   * AI tools to set up; [] turns AI off. Default: the list already in yardhand.json, else the tools
+   * found in the repo, else AGENTS.md only.
+   */
+  agents?: Agent[];
 }
 
 /** Ignore files that, when they exist, should list issues/ so it never ships in a package or image. */
@@ -153,20 +167,26 @@ export function init(
   }
   const root = existing ?? resolve(cwd);
   const config: Config = { statuses, labels: [], assignees: {} };
+  let oldAgents: Agent[] | undefined;
   // --force replaces the statuses but keeps the labels and assignees already defined.
   if (existing) {
     try {
       const old = parseConfig(readFileSync(join(root, ISSUES_DIR, CONFIG_FILE), "utf8"));
       config.labels = old.labels;
       config.assignees = old.assignees;
+      oldAgents = old.agents;
     } catch {
       // An unreadable or invalid old config is being replaced anyway.
     }
   }
+  const agents = opts.agents ?? oldAgents ?? defaultAgents(root);
+  config.agents = agents;
   assertIssuesDirIsReal(root);
 
   // Plan the AGENTS.md / CLAUDE.md updates first: damaged markers must fail before anything is written.
-  const plan = planBlocks(root, renderBlock(config, version));
+  // With AI off nothing is planned, and blocks already there are left alone.
+  const plan = planBlocks(root, renderBlock(config, version), agents);
+  const skillPlan = planSkills(root, agents, version);
 
   mkdirSync(join(root, ISSUES_DIR), { recursive: true });
   // Everything that reads or changes issues/ happens under the same lock as new and move.
@@ -192,7 +212,7 @@ export function init(
       const dir = join(root, ISSUES_DIR, first, folderName("000", "maintain-repo"));
       try {
         mkdirSync(dir);
-        writeFileSync(join(dir, ISSUE_FILE), renderMaintainRepo(first, TOOL), { flag: "wx" });
+        writeFileSync(join(dir, ISSUE_FILE), renderMaintainRepo(first, TOOL, aiOn(config)), { flag: "wx" });
       } catch (err) {
         if (errCode(err) !== "EEXIST") throw err;
       }
@@ -220,7 +240,18 @@ export function init(
       if (errCode(err) !== "EEXIST") throw err;
     }
   }
-  return { root, statuses, blocks: applyBlocks(plan), ignoreFiles, workflow };
+  const blocks = applyBlocks(plan);
+  applySkills(root, skillPlan);
+  return {
+    root,
+    statuses,
+    blocks,
+    ignoreFiles,
+    workflow,
+    agents,
+    skills: { written: skillPlan.write.map((w) => w.path), removed: skillPlan.remove, skipped: skillPlan.skipped },
+    conflicts: agents.length ? findConflicts(root) : [],
+  };
 }
 
 export interface NewOptions {
@@ -280,6 +311,15 @@ export function effortWarning(id: string, effort: string, assignee: string, conf
   const a = config.assignees[assignee];
   if (a && a.type !== "model") return `${id} has effort but is assigned to a person (${assignee}). Effort only matters for a model.`;
   return null;
+}
+
+/** The warning for effort or a model assignee when AI is off ("agents": []), or null. */
+export function aiOffWarning(id: string, effort: string, assignee: string, config: Config): string | null {
+  if (aiOn(config)) return null;
+  const model = assignee !== "" && config.assignees[assignee]?.type === "model";
+  if (!effort && !model) return null;
+  const what = effort && model ? `effort and a model assignee (${assignee})` : effort ? "effort" : `a model assignee (${assignee})`;
+  return `${id} has ${what}, but AI is off ("agents": [] in ${ISSUES_DIR}/${CONFIG_FILE}). Add the AI tools there and run "${TOOL} init --force", or clear the field.`;
 }
 
 export interface NewResult {
@@ -378,6 +418,7 @@ export function newIssue(cwd: string, opts: NewOptions): NewResult {
           effort,
           dependsOn,
           related,
+          withEffort: aiOn(config),
         }),
         { flag: "wx" },
       );
@@ -387,8 +428,10 @@ export function newIssue(cwd: string, opts: NewOptions): NewResult {
       throw err;
     }
     const file = join(dir, ISSUE_FILE);
-    const warn = effortWarning(id, effort, assignee, config);
-    return { id, path: rel(root, file), kind, priority, parent: opts.parent ?? null, status, notes, warnings: warn ? [warn] : [] };
+    const warnings = [effortWarning(id, effort, assignee, config), aiOffWarning(id, effort, assignee, config)].filter(
+      (w): w is string => w !== null,
+    );
+    return { id, path: rel(root, file), kind, priority, parent: opts.parent ?? null, status, notes, warnings };
   });
 }
 
@@ -633,8 +676,11 @@ function collect(root: string, result: CheckResult): void {
     if (effort && !EFFORT_RE.test(effort)) {
       bad(here, "effort", `effort "${effort}" must be one word: lowercase letters, digits and dashes, like high.`);
     } else if (issue.id) {
-      const w = effortWarning(issue.id, effort, HANDLE_RE.test(assignee) ? assignee : "", config);
+      const handle = HANDLE_RE.test(assignee) ? assignee : "";
+      const w = effortWarning(issue.id, effort, handle, config);
       if (w) result.warnings.push({ path: here, rule: "effort-no-model", message: w });
+      const off = aiOffWarning(issue.id, effort, handle, config);
+      if (off) result.warnings.push({ path: here, rule: "ai-off", message: off });
     }
     if (issue.status === DONE_STATUS) {
       const open = uncheckedCriteria(text);
