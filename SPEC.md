@@ -35,7 +35,8 @@ issues/
     "@ryan": "person",
     "@claude-opus": { "type": "model", "run": "claude -p --model opus \"Build {{issue}}\"" }
   },
-  "agents": ["claude-code", "codex"]
+  "agents": ["claude-code", "codex"],
+  "about": { "qa": "A person tests it on staging before done." }
 }
 ```
 
@@ -48,7 +49,8 @@ issues/
 - `labels`: optional list of allowed label names, lowercase kebab-case, unique. Missing means none.
 - `assignees`: optional map of handle to `"person"` or `"model"`, or to an object `{ "type": "person" | "model", "run": "<command template>" }`. Handles are `@` plus lowercase kebab-case: `^@[a-z][a-z0-9]*(-[a-z0-9]+)*$` (no dots: `@gpt-6-1-sol`). `run` is kept for a future `run` command and is not used yet. Missing means none.
 - `agents`: the AI tools that work in this repo, any of `claude-code`, `codex`, `opencode`, `other` (any tool that reads `AGENTS.md` or `.agents/skills`). `[]` means AI is off. Missing (a config from before 0.4) means AI is on with `AGENTS.md` only. Set by `init`; to change it, edit the list and run `yardhand init --force`. See "AI tools".
-- `labels`, `assignees` and `agents` are edited by hand. No emails, here or in issues.
+- `about`: optional map of status name to one line of plain text saying what happens there. Every key must be a listed status. `init` asks for it for each custom status and saves it whether or not AI is on; the `AGENTS.md` block lists it. Built-in statuses have standard meanings in the block, which an `about` entry replaces. `init --force` keeps entries for statuses still listed and drops the rest.
+- `labels`, `assignees`, `agents` and `about` are edited by hand. No emails, here or in issues.
 
 ## IDs
 
@@ -143,7 +145,7 @@ All commands, `init` included, run from the repo root or any folder below it. Ya
 Interactive by default, in a terminal:
 
 1. **Pick statuses.** A space-bar checklist: `triage`, `ready` (pre-checked), `in-progress` (pre-checked), `review`, `merge-ready`, `blocked`, `canceled`, and "Add custom statuses...". `backlog` and `done` are always included. (`ready` replaced `todo` in 0.3.0.)
-2. **Custom statuses** (only if chosen). Free-form names separated by commas (semicolons also work), normalized (`Review 1` becomes `review-1`), shown as `Creating: ...`. Empty names, duplicates, `backlog`, `done`, `releases` and names with other characters are rejected.
+2. **Custom statuses** (only if chosen). Free-form names separated by commas (semicolons also work), normalized (`Review 1` becomes `review-1`), shown as `Creating: ...`. Empty names, duplicates, `backlog`, `done`, `releases` and names with other characters are rejected. Then, one question per custom status, in the order typed: `What happens in <status>? (one line, Enter to skip)`. Answers go to `about`.
 3. **Order** (always shown, so the team sets the order). A numbered list; nothing is pinned. Up/Down moves the cursor, space grabs or drops a status, while grabbed Up/Down moves it and a digit key (1-9) jumps it to that slot, Enter confirms. The starting order is `triage`, `backlog`, `ready`, `in-progress`, `review`, `merge-ready`, `blocked`, `done`, `canceled`, then custom statuses in the order typed.
 4. **AI tools.** A checklist: "Which AI tools will work in this repo?" with Claude Code, Codex, OpenCode, and "Other (reads AGENTS.md or .agents/skills)". Pre-checked: the `agents` already in `yardhand.json`, else the tools whose files are in the repo (`CLAUDE.md` or `.claude/` for Claude Code, `.codex/` for Codex, `.opencode/` or `opencode.json` for OpenCode, and Other when only `AGENTS.md` or `.agents/` is there). Picking none turns AI off. See "AI tools".
 5. **Ignore entries** (only if `.npmignore` or `.dockerignore` exists at the root without an `issues/` line). Asks `Add issues/ to ... so it never ships in a package or image?`, default yes.
@@ -281,7 +283,7 @@ Written between markers so `init` can update it:
 <!-- yardhand:end -->
 ```
 
-Content outside the markers is kept byte for byte, including when the block is appended and including bytes that are not valid UTF-8. Markers are found by plain text search anywhere in the file, so do not put the literal marker lines in your own text (for example in a fenced example); a pair there would be treated as the block. If the markers are damaged (one missing, reversed, or repeated), `init` fails and changes nothing, and it checks this before writing anything else. The block is generated from `yardhand.json` and the CLI version. It states: that it covers issue tracking only and the rest of the file wins for anything else; where issues live; the status words in order; the ID rules; use the commands for IDs, status changes and front matter, or follow the rules exactly by hand; the commands to use (`new`, `move`, `set`, `list`, `roadmap`, `release`); the field rules; the "Picking up work" convention; the skills and where they are; run `yardhand validate` before finishing; and the vocabulary mapping for Depot (level 1 is what Depot's skills call an epic, level 3 is a work item). Content outside the markers is never touched.
+Content outside the markers is kept byte for byte, including when the block is appended and including bytes that are not valid UTF-8. Markers are found by plain text search anywhere in the file, so do not put the literal marker lines in your own text (for example in a fenced example); a pair there would be treated as the block. If the markers are damaged (one missing, reversed, or repeated), `init` fails and changes nothing, and it checks this before writing anything else. The block is generated from `yardhand.json` and the CLI version. It states: that it covers issue tracking only and the rest of the file wins for anything else; where issues live; the status words in order, with what each one means (the `about` text, the standard meaning for a built-in status, or, for a custom status with no description, that models must not move issues into or out of it unless asked); the ID rules; use the commands for IDs, status changes and front matter, or follow the rules exactly by hand; the commands to use (`new`, `move`, `set`, `list`, `roadmap`, `release`); the field rules; the "Picking up work" convention; the skills and where they are; run `yardhand validate` before finishing; and the vocabulary mapping for Depot (level 1 is what Depot's skills call an epic, level 3 is a work item). Content outside the markers is never touched.
 
 ## Name constants
 

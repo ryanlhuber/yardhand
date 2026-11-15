@@ -75,11 +75,12 @@ An issue's status is the folder it is in. `backlog` means not refined yet; `read
     "@ryan": "person",
     "@claude-opus": "model"
   },
-  "agents": ["claude-code", "codex"]
+  "agents": ["claude-code", "codex"],
+  "about": { "qa": "A person tests it on staging before done." }
 }
 ```
 
-Edit `labels`, `assignees` and `agents` by hand. Labels are lowercase kebab-case. Handles are `@` plus lowercase kebab-case, with no dots: GPT-6.1 Sol is `@gpt-6-1-sol`. Never put emails here or in an issue; repos can be public.
+Edit `labels`, `assignees`, `agents` and `about` by hand. `about` says what happens in a custom status: `init` asks for one line per custom status (Enter skips), and the `AGENTS.md` block shows it to models. A custom status with no description is hands-off for models unless you ask. Labels are lowercase kebab-case. Handles are `@` plus lowercase kebab-case, with no dots: GPT-6.1 Sol is `@gpt-6-1-sol`. Never put emails here or in an issue; repos can be public.
 
 ### Keep issues out of packages and live sites
 

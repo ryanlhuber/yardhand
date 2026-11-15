@@ -23,6 +23,8 @@ export interface Config {
    * before this field existed) means AI is on with AGENTS.md only, as before.
    */
   agents?: Agent[];
+  /** One-line descriptions of statuses, by status name: what happens there. Missing means none. */
+  about?: Record<string, string>;
 }
 
 /** AI tools `init` can set up. "other" means any tool that reads AGENTS.md or .agents/skills. */
@@ -85,6 +87,23 @@ export function agentProblems(agents: unknown): string[] {
   return out;
 }
 
+/** Problems with the about map, empty when valid. Keys must be listed statuses; values are one line. */
+export function aboutProblems(about: unknown, statuses: unknown): string[] {
+  if (about === undefined) return [];
+  if (about === null || typeof about !== "object" || Array.isArray(about)) {
+    return ['"about" must be an object mapping a status to one line, like {"qa": "A person tests it on staging."}.'];
+  }
+  const list = Array.isArray(statuses) ? (statuses as unknown[]) : [];
+  const out: string[] = [];
+  for (const [status, text] of Object.entries(about)) {
+    if (!list.includes(status)) out.push(`"about" describes "${status}", which is not in "statuses". Remove it or fix the name.`);
+    if (typeof text !== "string") out.push(`"about" for "${status}" must be a string.`);
+    // eslint-disable-next-line no-control-regex
+    else if (/[\u0000-\u001f\u007f\u2028\u2029]/.test(text)) out.push(`"about" for "${status}" must be one line of plain text.`);
+  }
+  return out;
+}
+
 const isType = (t: unknown): t is AssigneeType => t === "person" || t === "model";
 
 /** Problems with the assignees map, empty when valid. A missing map means no assignees. */
@@ -115,12 +134,13 @@ export function parseConfig(text: string): Config {
   } catch {
     throw new YardhandError(`${CONFIG_FILE} is not valid JSON.`);
   }
-  const obj = (data ?? {}) as { statuses?: unknown; labels?: unknown; assignees?: unknown; agents?: unknown };
+  const obj = (data ?? {}) as { statuses?: unknown; labels?: unknown; assignees?: unknown; agents?: unknown; about?: unknown };
   const problems = [
     ...statusProblems(obj.statuses),
     ...labelProblems(obj.labels),
     ...assigneeProblems(obj.assignees),
     ...agentProblems(obj.agents),
+    ...aboutProblems(obj.about, obj.statuses),
   ];
   if (problems.length) throw new YardhandError(`${CONFIG_FILE}: ${problems.join(" ")}`);
   const assignees: Record<string, Assignee> = Object.create(null);
@@ -129,6 +149,11 @@ export function parseConfig(text: string): Config {
   }
   const config: Config = { statuses: obj.statuses as string[], labels: (obj.labels as string[] | undefined) ?? [], assignees };
   if (obj.agents !== undefined) config.agents = obj.agents as Agent[];
+  if (obj.about !== undefined) {
+    const about: Record<string, string> = {};
+    for (const [k, v] of Object.entries(obj.about as Record<string, string>)) if (v.trim()) about[k] = v.trim();
+    config.about = about;
+  }
   return config;
 }
 
@@ -138,6 +163,7 @@ export function serializeConfig(config: Config): string {
   for (const [handle, a] of Object.entries(config.assignees)) assignees[handle] = a.run === undefined ? a.type : a;
   const data: Record<string, unknown> = { statuses: config.statuses, labels: config.labels, assignees };
   if (config.agents !== undefined) data["agents"] = config.agents;
+  if (config.about !== undefined && Object.keys(config.about).length) data["about"] = config.about;
   return JSON.stringify(data, null, 2) + "\n";
 }
 

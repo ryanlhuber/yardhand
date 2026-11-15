@@ -138,13 +138,14 @@ async function main(argv: string[]): Promise<number> {
         agents = parsed;
       }
       let statuses: string[];
+      let about: Record<string, string> | undefined;
       let ignore = !values["no-ignore"];
       let ci = !values["no-ci"];
       if (values.statuses !== undefined) statuses = splitList(values.statuses);
       else if (values.yes) statuses = DEFAULT_STATUSES;
       else if (process.stdin.isTTY) {
         interactive = true;
-        statuses = await promptStatuses();
+        ({ statuses, about } = await promptStatuses());
         const root = initRoot(cwd);
         if (agents === undefined) {
           let saved: Agent[] | undefined;
@@ -163,7 +164,7 @@ async function main(argv: string[]): Promise<number> {
           ci = await confirmYes(`Add a GitHub Action that runs ${TOOL} validate on every push?`);
         }
       } else throw new YardhandError(`Not a terminal. Use "${TOOL} init --yes" (optionally with --statuses a,b,c).`);
-      const result = init(cwd, statuses, pkg.version, values.force ?? false, { ignore, ci, agents });
+      const result = init(cwd, statuses, pkg.version, values.force ?? false, { ignore, ci, agents, about });
       const lines = [
         `Created ${ISSUES_DIR}/ with statuses: ${result.statuses.join(" → ")}`,
         result.agents.length ? `AI tools: ${result.agents.join(", ")}` : "AI: off",

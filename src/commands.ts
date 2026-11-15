@@ -15,6 +15,7 @@ import { CONFIG_FILE, ISSUES_DIR, ISSUE_FILE, TOOL } from "./names.js";
 import {
   type Agent,
   type Config,
+  aboutProblems,
   aiOn,
   assertIssuesDirIsReal,
   findRoot,
@@ -88,6 +89,8 @@ export interface InitOptions {
    * found in the repo, else AGENTS.md only.
    */
   agents?: Agent[];
+  /** Status descriptions to add or replace. Ones already saved are kept for statuses still listed. */
+  about?: Record<string, string>;
 }
 
 /** Ignore files that, when they exist, should list issues/ so it never ships in a package or image. */
@@ -168,6 +171,7 @@ export function init(
   const root = existing ?? resolve(cwd);
   const config: Config = { statuses, labels: [], assignees: {} };
   let oldAgents: Agent[] | undefined;
+  let oldAbout: Record<string, string> | undefined;
   // --force replaces the statuses but keeps the labels and assignees already defined.
   if (existing) {
     try {
@@ -175,12 +179,21 @@ export function init(
       config.labels = old.labels;
       config.assignees = old.assignees;
       oldAgents = old.agents;
+      oldAbout = old.about;
     } catch {
       // An unreadable or invalid old config is being replaced anyway.
     }
   }
   const agents = opts.agents ?? oldAgents ?? defaultAgents(root);
   config.agents = agents;
+  // Keep descriptions for statuses that are still listed; drop the rest. New ones win; blank ones clear.
+  const about: Record<string, string> = {};
+  for (const [s, text] of Object.entries({ ...oldAbout, ...opts.about })) {
+    if (statuses.includes(s) && text.trim()) about[s] = text.trim();
+  }
+  if (Object.keys(about).length) config.about = about;
+  const aboutBad = aboutProblems(about, statuses);
+  if (aboutBad.length) throw new YardhandError(aboutBad.join(" "));
   assertIssuesDirIsReal(root);
 
   // Plan the AGENTS.md / CLAUDE.md updates first: damaged markers must fail before anything is written.

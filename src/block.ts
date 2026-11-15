@@ -13,6 +13,27 @@ import type { Agent, Config } from "./config.js";
 import { importsAgentsMd, skillDirsFor, SKILLS } from "./agents.js";
 import { SKILL_PREFIX } from "./names.js";
 
+/** What the built-in statuses mean. A description in "about" replaces these. */
+export const BUILT_IN_ABOUT: Record<string, string> = {
+  triage: "New and not sorted yet.",
+  backlog: "Not refined yet.",
+  ready: "Refined, sized, validated and safe to build.",
+  "in-progress": "Claimed and being worked on.",
+  review: "Built, waiting for someone other than the builder to review it.",
+  "merge-ready": "Reviewed, waiting to be merged.",
+  blocked: "Waiting on something outside the issue.",
+  done: "Finished.",
+  canceled: "Will not be done.",
+};
+
+/** One line per status: what happens there. A status with no description is hands-off for models. */
+export function statusMeanings(config: Config): string[] {
+  return config.statuses.map((s) => {
+    const about = config.about?.[s] ?? BUILT_IN_ABOUT[s];
+    return about ? `  - \`${s}\`: ${about}` : `  - \`${s}\`: no description. Do not move issues into or out of it unless asked.`;
+  });
+}
+
 /** The generated "Work items" block. Built from the config and CLI version so it cannot drift. */
 export function renderBlock(config: Config, version: string): string {
   const statuses = config.statuses.join(" → ");
@@ -27,7 +48,8 @@ export function renderBlock(config: Config, version: string): string {
     `Issues are files in this repo. \`${TOOL}\` manages them. Do not edit this block by hand; \`${TOOL} init\` regenerates it.`,
     "",
     `- **Where:** \`${ISSUES_DIR}/<status>/<id>-<slug>/${ISSUE_FILE}\`. An issue's status is the folder it is in.`,
-    `- **Statuses, in order:** ${statuses} (defined in \`${ISSUES_DIR}/${CONFIG_FILE}\`, with the allowed \`labels\` and \`assignees\`).`,
+    `- **Statuses, in order:** ${statuses} (defined in \`${ISSUES_DIR}/${CONFIG_FILE}\`, with the allowed \`labels\` and \`assignees\`, and status descriptions under \`about\`). What each one means:`,
+    ...statusMeanings(config),
     "- **IDs:** `017` (a feature or goal), `017.01` (a piece of it), `017.01.01` (a buildable unit, one model session). Three levels at most. `000` is the catch-all for maintenance and bugs with no clear home. Bugs are issues with `kind: bug`. New issues start in the first status.",
     `- **Use the commands** for new IDs, status changes and front matter. Without them, follow these rules exactly: the next ID is the highest existing one plus one (check every status folder, including done), IDs are never reused, \`status:\` matches the folder, and the front matter comments stay. The H1 title and the body are fine to edit by hand.`,
     `  - Create: \`npx ${TOOL} new <slug> [--parent <id>] [--kind feature|task|bug] [--priority urgent|high|medium|low] [--size small|medium|large] [--labels <names>] [--depends-on <ids>] [--related <ids>] [--assignee @handle] [--effort <word>]\``,

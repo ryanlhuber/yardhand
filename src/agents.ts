@@ -60,7 +60,7 @@ const npx = `npx ${TOOL}`;
 const GENERATED = (version: string) =>
   `${GENERATED_MARK} v${version}. Do not edit: "${TOOL} init --force" rewrites this file. -->`;
 
-const RULES = `The rules are in the ${TOOL} section of AGENTS.md (or CLAUDE.md). Read it first. When this repo has the CLI (\`${npx}\`, or \`pnpm dlx ${TOOL}\` / \`bunx ${TOOL}\`), use it for new IDs, status moves and front matter. Without it, follow the rules in that section exactly.`;
+const RULES = `The rules are in the ${TOOL} section of AGENTS.md (or CLAUDE.md). Read it first. When this repo has the CLI (\`${npx}\`, or \`pnpm dlx ${TOOL}\` / \`bunx ${TOOL}\`), use it for new IDs, status moves and front matter. Without it, follow the rules in that section exactly. That section also says what each status means; never move an issue into or out of a status that has no description unless asked.`;
 
 /** The four skills. Each is the body of one SKILL.md, without the front matter. */
 export const SKILLS: { name: string; description: string; body: string[] }[] = [

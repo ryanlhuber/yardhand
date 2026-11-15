@@ -137,3 +137,32 @@ test("agents: conflicts outside the block are reported, lines inside it are not"
   writeFileSync(join(off, "AGENTS.md"), "Track work in Jira.\n");
   assert.deepEqual(init(off, STATUSES, "0.0.0", false, { agents: [] }).conflicts, [], "AI off: nothing to check");
 });
+
+test("about: custom status descriptions are saved, listed in the block, and kept by --force", () => {
+  const root = fresh();
+  const statuses = ["backlog", "ready", "in-progress", "qa", "review-2", "done"];
+  init(root, statuses, "0.0.0", false, { agents: ["codex"], about: { qa: "A person tests it on staging." } });
+  assert.deepEqual(JSON.parse(read(root, "issues/yardhand.json")).about, { qa: "A person tests it on staging." });
+  const block = read(root, "AGENTS.md");
+  assert.match(block, /`qa`: A person tests it on staging\./);
+  assert.match(block, /`review-2`: no description\. Do not move issues into or out of it unless asked\./);
+  assert.match(block, /`ready`: Refined, sized, validated and safe to build\./);
+  init(root, ["backlog", "qa", "done"], "0.0.0", true);
+  assert.deepEqual(JSON.parse(read(root, "issues/yardhand.json")).about, { qa: "A person tests it on staging." });
+  init(root, ["backlog", "done"], "0.0.0", true);
+  assert.equal(JSON.parse(read(root, "issues/yardhand.json")).about, undefined, "dropped with the status");
+});
+
+test("about: saved even when AI is off, so turning AI on later needs no new answers", () => {
+  const root = fresh();
+  init(root, ["backlog", "qa", "done"], "0.0.0", false, { agents: [], about: { qa: "Tested by hand." } });
+  assert.ok(!existsSync(join(root, "AGENTS.md")));
+  init(root, ["backlog", "qa", "done"], "0.0.0", true, { agents: ["codex"] });
+  assert.match(read(root, "AGENTS.md"), /`qa`: Tested by hand\./);
+});
+
+test("about: bad entries are rejected", () => {
+  assert.throws(() => parseConfig('{"statuses":["backlog","done"],"about":{"qa":"x"}}'), /not in "statuses"/);
+  assert.throws(() => parseConfig('{"statuses":["backlog","done"],"about":{"done":"a\\nb"}}'), /one line/);
+  assert.throws(() => init(fresh(), ["backlog", "done"], "0.0.0", false, { about: { done: "a\nb" } }), /one line/);
+});

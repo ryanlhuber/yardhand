@@ -126,8 +126,14 @@ function cancel(): never {
   process.exit(1);
 }
 
-/** The interactive `init` flow: pick statuses, add custom ones, and order them. */
-export async function promptStatuses(): Promise<string[]> {
+export interface StatusAnswers {
+  statuses: string[];
+  /** Descriptions typed for custom statuses. Skipped ones are left out. */
+  about: Record<string, string>;
+}
+
+/** The interactive `init` flow: pick statuses, add custom ones, describe them, and order them. */
+export async function promptStatuses(): Promise<StatusAnswers> {
   p.intro(`${TOOL} init`);
   const chosen = await p.multiselect({
     message: "Which statuses do you want? (backlog and done are always included)",
@@ -157,10 +163,24 @@ export async function promptStatuses(): Promise<string[]> {
     p.log.info(`Creating: ${custom.join(", ")}`);
   }
 
+  // One question per custom status, in the order typed. Enter skips it.
+  const about: Record<string, string> = {};
+  for (const name of custom) {
+    const text = await p.text({
+      message: `What happens in ${name}? (one line, Enter to skip)`,
+      placeholder: "A person tests it on staging before done.",
+      validate: (v) =>
+        // eslint-disable-next-line no-control-regex
+        /[\u0000-\u001f\u007f\u2028\u2029]/.test(v ?? "") ? "Use one line of plain text." : undefined,
+    });
+    if (p.isCancel(text)) return cancel();
+    if (typeof text === "string" && text.trim()) about[name] = text.trim();
+  }
+
   // Always shown: the right order is the team's decision, not the tool's. Enter accepts it as is.
   const order = await reorderPrompt(orderStatuses(picked, custom));
   if (order === null) return cancel();
-  return order;
+  return { statuses: order, about };
 }
 
 /** Ask a yes/no question that defaults to yes. Cancelling stops init with nothing changed. */
