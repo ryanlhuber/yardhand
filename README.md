@@ -92,7 +92,7 @@ Yardhand works the same with or without AI. `init` asks "Which AI tools will wor
 Pick one or more and `init` writes:
 
 - A rules block in `AGENTS.md`, between `<!-- yardhand:start -->` and `<!-- yardhand:end -->`. Nothing outside the markers changes.
-- Four skills: `yardhand-plan` (turn a goal into issues), `yardhand-refine` (get an issue to `ready`), `yardhand-build` (pick up and build an issue), and `yardhand-review` (check the work against the acceptance criteria; never reviews its own work). They go in `.agents/skills/` for Codex, OpenCode and other tools, and in `.claude/skills/` for Claude Code.
+- Four skills: `yardhand-plan` (turn a goal into issues), `yardhand-refine` (get an issue to `ready`), `yardhand-build` (pick up and build an issue), and `yardhand-review` (check the work against the acceptance criteria; never reviews its own work). They go in `.agents/skills/`, which most AI tools read. Claude Code only reads `.claude/skills/`, so it gets an identical copy there.
 - For Claude Code, the block in `CLAUDE.md`. If your `CLAUDE.md` already has an `@AGENTS.md` line, it is left alone; if there is no `CLAUDE.md`, one is created with just that line.
 
 The choice is saved as `agents` in `issues/yardhand.json` (`[]` means AI is off). To change it, edit the list and run `yardhand init --force`. Skills for a tool you dropped are removed; only files yardhand generated are ever replaced or removed.

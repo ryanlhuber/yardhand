@@ -57,11 +57,12 @@ test("agents: codex only writes AGENTS.md and .agents/skills, not CLAUDE.md", ()
   assert.match(read(root, "AGENTS.md"), /For anything else, the rest of this file wins/);
 });
 
-test("agents: claude code only writes .claude/skills and a CLAUDE.md that imports AGENTS.md", () => {
+test("agents: claude code gets .agents/skills plus an identical copy in .claude/skills, and a CLAUDE.md that imports AGENTS.md", () => {
   const root = fresh();
   init(root, STATUSES, "0.0.0", false, { agents: ["claude-code"] });
-  for (const s of SKILLS) assert.ok(existsSync(join(root, skill(".claude/skills", s.name))), s.name);
-  assert.ok(!existsSync(join(root, ".agents")), "Claude Code does not read .agents/skills");
+  for (const s of SKILLS) {
+    assert.equal(read(root, skill(".claude/skills", s.name)), read(root, skill(".agents/skills", s.name)), s.name);
+  }
   assert.equal(read(root, "CLAUDE.md"), "@AGENTS.md\n");
   assert.match(read(root, "AGENTS.md"), /yardhand:start/);
 });

@@ -41,9 +41,12 @@ export function parseAgents(raw: string): Agent[] | string {
   return out;
 }
 
-/** Skill folders and who reads them. Codex, OpenCode and most other tools read .agents/skills; Claude Code reads .claude/skills. */
+/**
+ * Skill folders. `.agents/skills` is the main copy, written whenever AI is on: most tools read it.
+ * Claude Code only reads `.claude/skills`, so it gets an identical copy there.
+ */
 export const SKILL_DIRS = [
-  { dir: ".agents/skills", for: (a: Agent[]) => a.some((x) => x !== "claude-code") },
+  { dir: ".agents/skills", for: (a: Agent[]) => a.length > 0 },
   { dir: ".claude/skills", for: (a: Agent[]) => a.includes("claude-code") },
 ] as const;
 
