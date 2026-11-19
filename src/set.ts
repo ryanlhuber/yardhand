@@ -6,7 +6,7 @@ import { findRoot, loadConfig } from "./config.js";
 import { allIds, assertComplete, rel, scan } from "./scan.js";
 import { parseFrontMatter, upsertField } from "./frontmatter.js";
 import { commitIssue } from "./commit.js";
-import { readIssues } from "./issues.js";
+import { readIssues, type WriteGuard } from "./issues.js";
 import { withLock } from "./lock.js";
 import {
   KINDS,
@@ -20,7 +20,7 @@ import {
   splitIdList,
   splitList,
 } from "./ids.js";
-import { aiOffWarning, checkAssignee, checkEffort, checkLabels, checkSize, effortWarning } from "./commands.js";
+import { aiOffWarning, assertUnchanged, checkAssignee, checkEffort, checkLabels, checkSize, effortWarning } from "./commands.js";
 import { quoteHandle } from "./template.js";
 
 export interface SetOptions {
@@ -58,7 +58,7 @@ const isNone = (v: string) => v.trim().toLowerCase() === "none";
 const show = (v: string) => (v === "" ? "none" : v);
 
 /** Change front matter on an existing issue. Renames the folder when kind changes (the bug- prefix). */
-export function setIssue(cwd: string, id: string, opts: SetOptions): SetResult {
+export function setIssue(cwd: string, id: string, opts: SetOptions, guard: WriteGuard = {}): SetResult {
   if (!isValidId(id)) throw new YardhandError(`"${id}" is not a valid ID.`);
   if (Object.values(opts).every((v) => v === undefined)) {
     throw new YardhandError("Nothing to set. Pass at least one of --kind, --priority, --size, --labels, --parent, --depends-on, --related, --assignee, --effort, --released-in.");
@@ -87,6 +87,7 @@ export function setIssue(cwd: string, id: string, opts: SetOptions): SetResult {
       if (err instanceof YardhandError) throw err;
       throw new YardhandError(`Cannot read ${rel(root, file)}.`);
     }
+    assertUnchanged(text, guard, id);
     const fm = parseFrontMatter(text);
     if (!fm) throw new YardhandError(`${rel(root, file)} has no valid front matter. Run validate first.`);
     const current = fm.fields;

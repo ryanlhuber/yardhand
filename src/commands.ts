@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
-import { YardhandError, NotInitializedError } from "./errors.js";
+import { ConflictError, YardhandError, NotInitializedError } from "./errors.js";
 import { CONFIG_FILE, ISSUES_DIR, ISSUE_FILE, TOOL } from "./names.js";
 import {
   type Agent,
@@ -52,7 +52,7 @@ import {
 } from "./ids.js";
 import { parseFrontMatter, setField } from "./frontmatter.js";
 import { commitIssue, TMP_RE, tryRemove } from "./commit.js";
-import { readIssues, parentField } from "./issues.js";
+import { hashText, readIssues, parentField, type WriteGuard } from "./issues.js";
 import { buildRoadmap } from "./roadmap.js";
 import { RELEASES_DIR, ROADMAP_FILE } from "./names.js";
 import { renderIssue, renderMaintainRepo, titleFromSlug } from "./template.js";
@@ -459,7 +459,7 @@ export interface MoveResult {
   notes: string[];
 }
 
-export function moveIssue(cwd: string, id: string, statusInput: string): MoveResult {
+export function moveIssue(cwd: string, id: string, statusInput: string, guard: WriteGuard = {}): MoveResult {
   const root = findRoot(cwd);
   const config = loadConfig(root);
   const status = normalizeName(statusInput);
@@ -502,6 +502,7 @@ export function moveIssue(cwd: string, id: string, statusInput: string): MoveRes
       if (err instanceof YardhandError) throw err;
       throw new YardhandError(`Cannot read ${rel(root, file)} (${errCode(err)}).`);
     }
+    assertUnchanged(text, guard, id);
     const updated = setField(text, "status", status);
     commitIssue(root, issue, updated, {
       destDir: dest,
@@ -892,4 +893,11 @@ export function uncheckedCriteria(text: string): number {
     if (inside && /^\s*[-*+]\s+\[ \]\s+\S/.test(line)) count++;
   }
   return count;
+}
+
+/** Refuse to write when the caller's copy of ISSUE.md is out of date. Called under the lock. */
+export function assertUnchanged(text: string, guard: WriteGuard, id: string): void {
+  if (guard.expectHash !== undefined && hashText(text) !== guard.expectHash) {
+    throw new ConflictError(`Issue ${id} changed since it was loaded. Reload it and try again. Nothing was changed.`);
+  }
 }

@@ -1,0 +1,250 @@
+/*
+ * Styles for the yardhand issues viewer. Compiled by Tailwind at build time into
+ * src/ui/client/ui.css (npm run build:css), which ships inside the CLI bundle.
+ * Colors are shadcn/ui's neutral theme tokens, so the page looks like shadcn without React.
+ */
+@import "tailwindcss";
+@source "./client/index.html";
+@source "./client/app.js";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --warning: oklch(0.666 0.179 58.318);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --sidebar: oklch(0.985 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --warning: oklch(0.769 0.188 70.08);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --sidebar: oklch(0.175 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body {
+    @apply h-full;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  /* The page has its own clear behavior (Esc), so hide the browser's search "x". */
+  input[type="search"]::-webkit-search-cancel-button {
+    appearance: none;
+  }
+  ::selection {
+    @apply bg-primary/15;
+  }
+}
+
+/* Reusable controls, shadcn-style. @utility (not @layer components) so they can build on each other. */
+@utility ui-input {
+  @apply h-8 w-full min-w-0 rounded-md border border-input bg-transparent px-2.5 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground dark:bg-input/30;
+  @apply focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50;
+  @apply disabled:cursor-not-allowed disabled:opacity-50;
+  &[aria-invalid="true"] {
+    @apply border-destructive ring-destructive/20;
+  }
+}
+@utility ui-select {
+  @apply ui-input appearance-none bg-no-repeat pr-8;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 0.5rem center;
+  & option,
+  & optgroup {
+    @apply bg-popover text-popover-foreground;
+  }
+}
+@utility ui-btn {
+  @apply inline-flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md px-3 text-sm font-medium whitespace-nowrap transition-colors outline-none select-none;
+  @apply focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50;
+}
+@utility ui-btn-ghost {
+  @apply ui-btn hover:bg-accent hover:text-accent-foreground;
+}
+@utility ui-btn-outline {
+  @apply ui-btn border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:hover:bg-input/50;
+}
+@utility ui-icon-btn {
+  @apply ui-btn-ghost size-8 px-0 text-muted-foreground hover:text-foreground;
+}
+@utility ui-badge {
+  @apply inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs font-medium whitespace-nowrap;
+}
+@utility ui-kbd {
+  @apply pointer-events-none inline-flex h-5 items-center rounded-sm border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground select-none;
+}
+@utility ui-label {
+  @apply text-xs font-medium text-muted-foreground;
+}
+@utility ui-chip {
+  @apply inline-flex h-6 cursor-pointer items-center rounded-md border px-2 text-xs font-medium transition-colors outline-none select-none hover:bg-accent;
+  @apply focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50;
+  &[aria-pressed="true"] {
+    @apply border-primary bg-primary text-primary-foreground hover:bg-primary/90;
+  }
+}
+
+@layer components {
+  mark {
+    @apply rounded-[3px] bg-amber-200/70 px-0.5 text-inherit dark:bg-amber-400/30;
+  }
+}
+
+/* Rendered ISSUE.md bodies. Plain CSS, so there is no typography plugin to depend on. */
+@layer components {
+  .md {
+    @apply text-[15px] leading-7 text-foreground/90;
+  }
+  .md > * + * {
+    @apply mt-4;
+  }
+  .md h1,
+  .md h2,
+  .md h3,
+  .md h4,
+  .md h5,
+  .md h6 {
+    @apply font-semibold tracking-tight text-foreground;
+  }
+  .md h1 {
+    @apply mt-8 text-xl;
+  }
+  .md h2 {
+    @apply mt-8 border-b pb-1.5 text-base;
+  }
+  .md h3 {
+    @apply mt-6 text-[15px];
+  }
+  .md h4,
+  .md h5,
+  .md h6 {
+    @apply mt-5 text-sm;
+  }
+  .md > :first-child {
+    @apply mt-0;
+  }
+  .md a {
+    @apply font-medium text-foreground underline decoration-muted-foreground/50 underline-offset-4 hover:decoration-foreground;
+  }
+  .md strong {
+    @apply font-semibold text-foreground;
+  }
+  .md ul {
+    @apply list-disc pl-6;
+  }
+  .md ol {
+    @apply list-decimal pl-6;
+  }
+  .md li + li {
+    @apply mt-1;
+  }
+  .md li > ul,
+  .md li > ol {
+    @apply mt-1;
+  }
+  .md li.task {
+    @apply -ml-6 flex list-none items-start gap-2;
+  }
+  .md li.task > input {
+    @apply mt-[0.4rem] size-3.5 shrink-0 accent-foreground;
+  }
+  .md li.task.done > span {
+    @apply text-muted-foreground line-through decoration-muted-foreground/60;
+  }
+  .md code {
+    @apply rounded-sm bg-muted px-[0.3rem] py-[0.15rem] font-mono text-[0.85em];
+  }
+  .md pre {
+    @apply overflow-x-auto rounded-lg border bg-muted/50 p-4 text-[13px] leading-6;
+  }
+  .md pre code {
+    @apply bg-transparent p-0 text-inherit;
+  }
+  .md blockquote {
+    @apply border-l-2 pl-4 text-muted-foreground italic;
+  }
+  .md hr {
+    @apply my-6;
+  }
+  .md img {
+    @apply max-w-full rounded-md border;
+  }
+  .md table {
+    @apply block w-full overflow-x-auto text-sm;
+  }
+  .md th,
+  .md td {
+    @apply border px-3 py-1.5 text-left;
+  }
+  .md th {
+    @apply bg-muted/50 font-medium;
+  }
+}

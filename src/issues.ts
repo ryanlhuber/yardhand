@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ISSUE_FILE } from "./names.js";
@@ -54,4 +55,12 @@ export function descendantsOf(issues: Issue[], id: string): Issue[] {
     }
   }
   return out;
+}
+
+/** Fingerprint of an ISSUE.md's text, so a writer can tell whether the file changed since it was read. */
+export const hashText = (text: string): string => createHash("sha256").update(text).digest("hex");
+
+/** Optional guard for writers: refuse when ISSUE.md no longer has this hash. */
+export interface WriteGuard {
+  expectHash?: string;
 }

@@ -36,7 +36,24 @@ Nothing is installed into your project. `init` writes plain files only.
 | `yardhand roadmap` | Writes `issues/ROADMAP.md`, a tree of every issue built from `parent:` fields, with done counts, sizes, and how many large issues are left. `--stdout` prints it instead. |
 | `yardhand release <version>` | Stamps `released-in:` on every issue in `done` that has none and writes `issues/releases/<version>.md`. `--dry-run` previews. |
 | `yardhand validate` | Checks every issue and reports each problem with its path. Exits `1` if anything is wrong, so it works in CI. `--json` for scripts. Warns (without failing) about long slugs, a stale `ROADMAP.md`, `size` on a parent, open `large` issues (consider splitting), done issues with unchecked acceptance criteria, `effort` with no model assigned, `effort` or a model assignee when AI is off, and `issues/` that could be published by npm or copied into a Docker image. |
+| `yardhand ui` | Opens the issues viewer in your browser at `http://localhost:4747/issues/`. See [Issues viewer](#issues-viewer). `--port`, `--base /path` and `--no-open` change the defaults. |
 | `yardhand <command> --help`, `--version` | Prints usage for a command, or the installed version. |
+
+## Issues viewer
+
+```sh
+npx yardhand ui
+```
+
+With pnpm: `pnpm dlx yardhand ui`. With bun: `bunx yardhand ui`.
+
+A local page for people who'd rather not use the terminal, or anyone who wants to see the board. It looks like an email client: issues grouped by status on the left (each status folds open and closed), the issue in the middle, and its fields on the right.
+
+- **Move an issue:** drag it onto a status, or change the Status field.
+- **Change fields:** priority, size, labels, assignee, parent, dependencies and more, with the same checks as `yardhand set`.
+- **Search:** type words, or filters like `label:auth priority:high`. `017` finds 017 and everything under it. Done issues are included. Press `/` to search, `Esc` to clear.
+
+It runs on your computer only and works offline: nothing is sent anywhere, and nothing about it ships with your project. Changes are saved to the files in your checkout. Commit them as usual. If a person or model edits an issue while you have it open, the viewer won't overwrite their change; it shows you the latest version instead. The issue text itself is read-only in the viewer; edit `ISSUE.md` for that.
 
 ## Layout
 
@@ -193,4 +210,4 @@ npm install
 npm run check   # typecheck, build, tests
 ```
 
-Node 20+. Zero runtime dependencies: `@clack/prompts` is bundled at build time.
+Node 20+. Zero runtime dependencies: `@clack/prompts` is bundled at build time, and the viewer's page (`src/ui/client/`) is bundled into `dist/cli.js` as text. Tailwind is a build-time tool only: `npm run build` compiles `src/ui/styles.css` to `src/ui/client/ui.css` (not committed) before bundling.

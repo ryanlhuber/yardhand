@@ -237,6 +237,21 @@ Warnings:
 
 `--json` prints `{ "ok": true|false, "errors": [...], "warnings": [...] }`, each entry having `path`, `rule` and `message`. A done issue without `released-in` is not flagged.
 
+### `yardhand ui [--port <n>] [--base <path>] [--no-open]`
+
+Starts a local issues viewer and opens it in the browser. It is optional: every rule can still be followed by hand.
+
+- **Local only.** It listens on `127.0.0.1` and runs from a checkout of the repo. It is never deployed and is not part of any build; `issues/` still never ships. Changes are written to the files in that checkout; the viewer never commits, so they show in `git status`.
+- **Address.** `http://localhost:4747/issues/` by default. Everything is under the base path (page at `<base>/`, files at `<base>/assets/`, API at `<base>/api/`), so it cannot collide with a project's own pages. `--base` changes the path. When the default port is busy the next free one is used (up to 20 tries); a busy port given with `--port` is an error. `--no-open` skips opening the browser. Ctrl+C stops it.
+- **Offline.** The page, its compiled Tailwind CSS and its icons are bundled into the CLI. No CDN, web fonts or network requests; images in an issue body load only from that issue's folder.
+- **Layout.** Left: a search box and every issue grouped by status, each status collapsible with a count (`done` starts collapsed). Center: the rendered `ISSUE.md` body, read-only. Right: the front matter as fields, plus children, linked issues and problems `validate` reports for that issue.
+- **Moving.** Drag an issue onto a status (a collapsed one too), or use the Status field. Both call the same code as `yardhand move`, so only that issue moves.
+- **Editing.** Kind, priority, size, labels, parent, depends-on, related, assignee, effort and released-in are changed through the same code as `yardhand set`, with the same checks. An empty value clears a field. The body is not editable in the viewer.
+- **No silent overwrites.** Every write sends a hash of `ISSUE.md` as the page loaded it. If the file changed since (a person or model edited it), nothing is written and the page shows the latest version. The check happens under the same lock as the CLI.
+- **Live.** The page re-reads the issues every 5 seconds and when the window regains focus.
+- **Search.** Filters as you type, over every status including `done`. Plain words must all appear in the ID, title, body, labels or assignee (case-insensitive). `status:`, `kind:`, `priority:`, `size:`, `label:`, `assignee:`, `parent:` (everything under that issue) and `depends-on:` filter like `yardhand list`. An ID-shaped word matches on separators: `017` matches `017` and `017.01`, never `0170`. `/` focuses the box, `Esc` clears it, and the search and the open issue are kept in the URL.
+- **Safety.** Requests must name this server as `Host` (blocks DNS rebinding). Writes must be `POST` with a JSON body, an `X-Yardhand: 1` header and, when the browser sends one, this server's `Origin`; a page in another tab cannot send that header without a preflight the server never approves. The page never sends paths: issues are found by ID, and reference files only from inside that issue's folder (no `..`, dot files or symlinks). The page has a strict Content-Security-Policy, markdown is rendered with all HTML escaped, links are limited to `http(s)`, `mailto` and files in the issue folder, and SVG files are served sandboxed.
+
 ### Bare `yardhand`
 
 With no command: if stdin and stdout are both a terminal and no `issues/yardhand.json` is found here or above, it runs the interactive `init`. In every other case (already set up, not a terminal, or a root that cannot be read) it prints the help. `--help`, `--version` and every explicit command are unchanged.
@@ -291,7 +306,7 @@ The tool name, config filename, issues folder name, issue filename, roadmap file
 
 ## Out of v1
 
-`status add|rename|remove`, the frontend, a dev-dependency prompt, `validate --fix`, single-issue `validate`, and `run` (an optional command that would follow "Picking up work" and launch the assigned model with its `run` template).
+`status add|rename|remove`, editing an issue body in the viewer, a multi-repo viewer, a static export of the viewer, a dev-dependency prompt, `validate --fix`, single-issue `validate`, and `run` (an optional command that would follow "Picking up work" and launch the assigned model with its `run` template).
 
 ## Picking up work
 

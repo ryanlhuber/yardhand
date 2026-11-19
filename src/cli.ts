@@ -7,6 +7,7 @@ import { check, ignoreTargets, init, initRoot, moveIssue, newIssue, workflowWant
 import { setIssue } from "./set.js";
 import { formatTable, listIssues } from "./list.js";
 import { roadmap } from "./roadmap.js";
+import { DEFAULT_BASE, DEFAULT_PORT, openBrowser, startUi } from "./ui/server.js";
 import { release } from "./release.js";
 import { confirmYes, promptAgents, promptStatuses } from "./prompts.js";
 import { detectAgents, parseAgents } from "./agents.js";
@@ -56,6 +57,15 @@ const USAGE = {
 
   Stamps released-in on every done issue that has no version, and writes ${ISSUES_DIR}/releases/<version>.md.
   --dry-run shows what would happen and changes nothing.`,
+  ui: `${TOOL} ui [--port <n>] [--base <path>] [--no-open]
+
+  Opens the issues viewer in your browser: every issue grouped by status, the issue on the right,
+  and its fields beside it. Drag an issue onto a status to move it; change fields in the side panel.
+  Changes are written to the files on this computer only (commit them as usual). Works offline.
+  Listens on this computer only, at http://localhost:${DEFAULT_PORT}${DEFAULT_BASE}/ by default. Ctrl+C stops it.
+  --port <n>     port to use (default ${DEFAULT_PORT}; when busy, the next free one is used)
+  --base <path>  path to serve under (default ${DEFAULT_BASE})
+  --no-open      do not open the browser`,
   validate: `${TOOL} validate [--json]
 
   Checks every issue and prints each problem with its path. Exits 1 if there is any error.
@@ -342,6 +352,32 @@ async function main(argv: string[]): Promise<number> {
       );
       process.stderr.write(lines.join("\n") + "\n");
       return errors.length ? 1 : 0;
+    }
+    case "ui": {
+      const { values } = parseArgs({
+        args: rest,
+        allowPositionals: false,
+        options: { port: { type: "string" }, base: { type: "string" }, "no-open": { type: "boolean" } },
+      });
+      let port: number | undefined;
+      if (values.port !== undefined) {
+        port = Number(values.port);
+        if (!/^\d+$/.test(values.port) || port < 1 || port > 65535) throw new YardhandError(`--port must be a number from 1 to 65535.`);
+      }
+      const ui = await startUi(cwd, { port, base: values.base });
+      out(`Issues viewer: ${ui.url}\nChanges are saved to the files in this repo. Press Ctrl+C to stop.`);
+      if (!values["no-open"]) openBrowser(ui.url);
+      // Stay running until Ctrl+C; the open server keeps the process alive.
+      await new Promise<void>((resolve) => {
+        const stop = () => {
+          ui.close().then(resolve, resolve);
+          // Browsers keep connections open; do not wait on them.
+          setTimeout(resolve, 500).unref();
+        };
+        process.once("SIGINT", stop);
+        process.once("SIGTERM", stop);
+      });
+      return 0;
     }
     default:
       throw new YardhandError(`Unknown command "${command}". Run "${TOOL} --help".`);
