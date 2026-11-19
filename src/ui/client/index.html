@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="yardhand-base" content="{{BASE}}" />
+    <title>{{TITLE}}</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="{{BASE}}/assets/ui.css?v={{VERSION}}" />
+    <!-- Not deferred: it sets the theme before the first paint, then waits for the page. -->
+    <script src="{{BASE}}/assets/app.js?v={{VERSION}}"></script>
+  </head>
+  <body class="overflow-hidden">
+    <div class="flex h-dvh flex-col">
+      <header class="flex h-12 shrink-0 items-center gap-3 border-b bg-sidebar px-4">
+        <div class="flex min-w-0 items-center gap-2 text-sm">
+          <span class="grid size-6 place-items-center rounded-md bg-primary text-primary-foreground" aria-hidden="true">
+            <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h6"/></svg>
+          </span>
+          <span class="font-semibold">yardhand</span>
+          <span class="text-muted-foreground/60">/</span>
+          <span id="project" class="truncate font-medium text-muted-foreground"></span>
+        </div>
+        <div class="ml-auto flex items-center gap-1">
+          <span id="problems" class="hidden"></span>
+          <span id="connection" class="hidden"></span>
+          <button id="theme" type="button" class="ui-icon-btn" title="Theme"></button>
+        </div>
+      </header>
+
+      <main class="grid min-h-0 flex-1 grid-cols-[minmax(260px,340px)_1fr]">
+        <nav class="flex min-h-0 flex-col border-r bg-sidebar" aria-label="Issues">
+          <div class="space-y-2 border-b p-3">
+            <label class="relative block">
+              <span class="sr-only">Search issues</span>
+              <span id="search-icon" class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"></span>
+              <input id="search" type="search" class="ui-input bg-background pr-9 pl-8" placeholder="Search issues" autocomplete="off" spellcheck="false" />
+              <kbd class="ui-kbd absolute top-1/2 right-2 -translate-y-1/2">/</kbd>
+            </label>
+            <p id="search-summary" class="hidden px-0.5 text-xs text-muted-foreground"></p>
+          </div>
+          <div id="list" class="min-h-0 flex-1 overflow-y-auto p-2"></div>
+        </nav>
+
+        <section id="detail" class="min-h-0 overflow-y-auto lg:grid lg:grid-cols-[1fr_300px] lg:overflow-hidden" aria-live="polite"></section>
+      </main>
+    </div>
+    <div id="toasts" class="pointer-events-none fixed right-4 bottom-4 z-50 flex w-[360px] max-w-[calc(100vw-2rem)] flex-col gap-2"></div>
+  </body>
+</html>

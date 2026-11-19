@@ -12,3 +12,11 @@ export class NotInitializedError extends YardhandError {
     this.name = "NotInitializedError";
   }
 }
+
+/** The file changed since the caller read it (a person or model edited it in the meantime). Nothing was written. */
+export class ConflictError extends YardhandError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConflictError";
+  }
+}
