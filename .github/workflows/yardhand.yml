@@ -8,4 +8,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npx --yes yardhand@0.5.0 validate
+          cache: npm
+      # This repo is the yardhand package itself, so `npx yardhand` would look
+      # for a local bin that doesn't exist until it's built. Validate with this
+      # checkout's own build instead, so issues follow the latest rules.
+      - run: npm ci
+      - run: npm run build
+      - run: node dist/cli.js validate
