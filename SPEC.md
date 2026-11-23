@@ -33,7 +33,7 @@ issues/
   "labels": ["backend", "frontend"],
   "assignees": {
     "@ryan": "person",
-    "@claude-opus": { "type": "model", "run": "claude -p --model opus \"Build {{issue}}\"" }
+    "@claude-opus": "model"
   },
   "agents": ["claude-code", "codex"],
   "about": { "qa": "A person tests it on staging before done." }
@@ -47,7 +47,7 @@ issues/
 - Names are unique. `releases` is reserved and cannot be a status.
 - `backlog` means unrefined, `ready` means refined and safe to build, `in-progress` means claimed. `ready` is not required, but the "Picking up work" convention assumes it.
 - `labels`: optional list of allowed label names, lowercase kebab-case, unique. Missing means none.
-- `assignees`: optional map of handle to `"person"` or `"model"`, or to an object `{ "type": "person" | "model", "run": "<command template>" }`. Handles are `@` plus lowercase kebab-case: `^@[a-z][a-z0-9]*(-[a-z0-9]+)*$` (no dots: `@gpt-6-1-sol`). `run` is kept for a future `run` command and is not used yet. Missing means none.
+- `assignees`: optional map of handle to `"person"` or `"model"`, or to an object `{ "type": "person" | "model" }`. Handles are `@` plus lowercase kebab-case: `^@[a-z][a-z0-9]*(-[a-z0-9]+)*$` (no dots: `@gpt-6-1-sol`). Older configs may have a `"run"` key in the object form; it is accepted, kept when the file is rewritten, and ignored. Missing means none.
 - `agents`: the AI tools that work in this repo, any of `claude-code`, `codex`, `opencode`, `other` (any tool that reads `AGENTS.md` or `.agents/skills`). `[]` means AI is off. Missing (a config from before 0.4) means AI is on with `AGENTS.md` only. Set by `init`; to change it, edit the list and run `yardhand init --force`. See "AI tools".
 - `about`: optional map of status name to one line of plain text saying what happens there. Every key must be a listed status. `init` asks for it for each custom status and saves it whether or not AI is on; the `AGENTS.md` block lists it. Built-in statuses have standard meanings in the block, which an `about` entry replaces. `init --force` keeps entries for statuses still listed and drops the rest.
 - `labels`, `assignees`, `agents` and `about` are edited by hand. No emails, here or in issues.
@@ -306,11 +306,15 @@ The tool name, config filename, issues folder name, issue filename, roadmap file
 
 ## Out of v1
 
-`status add|rename|remove`, editing an issue body in the viewer, a multi-repo viewer, a static export of the viewer, a dev-dependency prompt, `validate --fix`, single-issue `validate`, and `run` (an optional command that would follow "Picking up work" and launch the assigned model with its `run` template).
+`status add|rename|remove`, editing an issue body in the viewer, a multi-repo viewer, a static export of the viewer, a dev-dependency prompt, `validate --fix`, and single-issue `validate`.
+
+## Not planned
+
+- `run`, a command that would launch the assigned model on an issue. The `yardhand-build` skill already covers picking up and building work inside an AI tool, and launching models would mean running shell commands stored in a file people edit by hand. Dropped 2026-11-22; the design is kept in the project's `cli-run-spec.md` if it comes back.
 
 ## Picking up work
 
-The same steps for a person, a model, a script, or a future `run` command:
+The same steps for a person, a model, or a script:
 
 1. Take an issue from `ready` whose `depends-on` issues are all `done`. Highest priority first, then lowest ID.
 2. Claim it: move it to `in-progress` and set `assignee` to yourself.

@@ -13,7 +13,8 @@
     "spec"
   ],
   "assignees": {
-    "@ryan": "person"
+    "@ryan": "person",
+    "@claude-opus": "model"
   },
   "agents": [
     "claude-code",

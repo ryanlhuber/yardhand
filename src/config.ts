@@ -8,7 +8,10 @@ export type AssigneeType = "person" | "model";
 
 export interface Assignee {
   type: AssigneeType;
-  /** Optional command template a later `run` command can use to launch a model. */
+  /**
+   * Left over from a planned `run` command that was dropped. Older configs may
+   * have it: it is accepted and kept on rewrite, but nothing uses it.
+   */
   run?: string;
 }
 
