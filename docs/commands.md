@@ -1,5 +1,7 @@
 # Commands
 
+The core commands are `init`, `new`, `move` and `validate`. The rest (`set`, `list`, `roadmap`, `release`, `ui`) are optional extras.
+
 Every command takes `--help`. `yardhand --version` prints the installed version. The prefix (`npx`, `pnpm dlx`, `bunx`) is left off below; see [Setup](setup.md).
 
 ## `yardhand init`

@@ -4,6 +4,33 @@ Yardhand is a file-based issue tracker that lives in a repo. Status is a folder,
 
 The files are the source of truth for the issues. The CLI is the main tool for developers and models, but every rule here can be followed by hand with a text editor and a file manager, and AI is optional. CI can run `validate` on every push (see `init`), so mistakes are caught however a change was made.
 
+## Core and extras
+
+Yardhand's value is that its rules are simple enough to follow by hand. To keep it that way, every feature is either core or an extra.
+
+**Core**, the part every user learns:
+
+- `issues/` with one folder per status, `backlog` and `done` among them, listed in `issues/yardhand.json`
+- One folder per issue, named `<id>-<slug>`, with an `ISSUE.md`
+- IDs and the numbering rules
+- The required fields: `id`, `kind`, `parent`, `status`
+- The body: an H1 title, a Description and Acceptance criteria
+- The commands `init`, `new`, `move` and `validate`
+
+**Extras**, which nobody has to learn or use:
+
+- The optional fields: `priority`, `size`, `labels`, `depends-on`, `related`, `assignee`, `effort`, `released-in`
+- Labels and assignees in `yardhand.json`, and status descriptions under `about`
+- The commands `set`, `list`, `roadmap`, `release` and `ui`
+- AI setup: the `AGENTS.md` block and the skills
+- The CI workflow
+
+Rules for extras:
+
+1. The core works fully with no extra in use. A repo where every optional field is blank and no extra command is ever run is a complete, valid yardhand repo.
+2. No extra ever becomes required, and no core rule depends on one.
+3. An extra a repo does not use costs that repo nothing: no field it must fill, no file it must keep, no error from `validate`.
+
 ## Layout
 
 ```
@@ -308,9 +335,29 @@ The tool name, config filename, issues folder name, issue filename, roadmap file
 
 `status add|rename|remove`, editing an issue body in the viewer, a multi-repo viewer, a static export of the viewer, a dev-dependency prompt, `validate --fix`, and single-issue `validate`.
 
-## Not planned
+## Non-goals
+
+Yardhand is a file-based issue tracker, not a project management suite. These are out on purpose, not just postponed:
+
+- A server, database or account. The files in the repo are the whole system.
+- Planning ceremony: sprints, cycles, story points, velocity, burndown charts, or agile vocabulary like epic and story.
+- Discussion threads, comments, mentions or notifications. Discussion belongs in pull requests and chat; decisions go into the issue text.
+- Time tracking and estimates in hours. `size` is a rough fit for one model session, not an estimate.
+- Running builds or launching models (see `run` below).
+
+Dropped features:
 
 - `run`, a command that would launch the assigned model on an issue. The `yardhand-build` skill already covers picking up and building work inside an AI tool, and launching models would mean running shell commands stored in a file people edit by hand. Dropped 2026-11-22; the design is kept in the project's `cli-run-spec.md` if it comes back.
+
+## Adding to yardhand
+
+A new field, command, flag or status rule must pass all three:
+
+1. **By hand.** A person with only a text editor and a file manager can follow it.
+2. **Checkable.** `validate` can check it mechanically, or it needs no check.
+3. **Belongs here.** It makes the file-based tracker better, and is not something a different tool already does well (a CI service, a chat app, an AI tool, a calendar).
+
+It also starts as an extra, never core, and follows the rules for extras above. If it fails any of the three, it does not go in. Fields that go unused are cut.
 
 ## Picking up work
 

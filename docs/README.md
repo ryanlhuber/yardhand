@@ -1,6 +1,6 @@
 # Yardhand docs
 
-The full guide. For a quick overview, start with the [main README](../README.md).
+The full guide. For a quick overview, start with the [main README](../README.md). New here? Read [Start with the core](issues.md#start-with-the-core) first.
 
 | Page | Covers |
 |---|---|

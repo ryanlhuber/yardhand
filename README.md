@@ -71,7 +71,7 @@ What and why.
 - [ ] Login form submits and shows errors
 ```
 
-Only `id`, `kind`, `parent` and `status` are required. [All fields →](https://github.com/ryanlhuber/yardhand/blob/main/docs/issues.md#issuemd)
+Only `id`, `kind`, `parent` and `status` are required. Everything else is an optional extra: leave it blank until you miss it. [All fields →](https://github.com/ryanlhuber/yardhand/blob/main/docs/issues.md#issuemd)
 
 ## Commands
 
@@ -87,7 +87,7 @@ Only `id`, `kind`, `parent` and `status` are required. [All fields →](https://
 | `validate` | Check everything; exits `1` on problems |
 | `ui` | Open the issues viewer in your browser |
 
-Every command takes `--help`. [All commands and flags →](https://github.com/ryanlhuber/yardhand/blob/main/docs/commands.md)
+You only need `init`, `new`, `move` and `validate`; the rest are optional. Every command takes `--help`. [All commands and flags →](https://github.com/ryanlhuber/yardhand/blob/main/docs/commands.md)
 
 ## Picking up work
 

@@ -7,6 +7,7 @@ What changed in each release. Starting with the next release, the issues behind 
 - **Docs:** the README is now a short overview, and the full guide lives in `docs/`.
 - **CI:** tests now run on Windows and macOS as well as Ubuntu.
 - **Repo:** yardhand now tracks its own issues in `issues/`.
+- **Spec:** SPEC.md now draws a line between the core (status folders, IDs, required fields, `init`, `new`, `move`, `validate`) and optional extras, lists non-goals, and sets a bar for adding anything new. The docs teach the core first.
 - **Spec:** the planned `run` command is dropped. A `"run"` key in older configs is still accepted and ignored.
 
 ## 0.5.0 (2026-11-19)

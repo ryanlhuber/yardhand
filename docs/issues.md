@@ -1,5 +1,16 @@
 # Issues
 
+## Start with the core
+
+You only need four things to use yardhand:
+
+1. **Status folders.** `issues/backlog/`, `issues/done/` and any others you pick, listed in `issues/yardhand.json`.
+2. **Issue folders.** `<id>-<slug>/` with an `ISSUE.md` inside.
+3. **Four required fields.** `id`, `kind`, `parent` (left out at the top level) and `status`.
+4. **A body.** A title, a Description and Acceptance criteria.
+
+Everything else on this page (priority, size, labels, assignees and the rest) is an optional extra. Leave it blank until you miss it. See [SPEC.md](../SPEC.md#core-and-extras) for the full line between core and extras.
+
 ## Layout
 
 ```
@@ -99,9 +110,9 @@ released-in:        # set by `release`
 - `parent` is the ID one level up (omit it for level 1). It is the source of truth for rollup, so moving work to a new parent means changing `parent:`, not the folder or ID.
 - `status` matches the folder (`move` keeps them in sync).
 
-### Optional fields
+### Optional fields (extras)
 
-Blank means unset.
+Blank means unset. None of these are needed; add them when they help.
 
 - `priority`: `urgent`, `high`, `medium` or `low`.
 - `size`: how much of one model session a buildable unit takes. `small` (a few files, under half a session), `medium` (a normal session), `large` (barely fits; consider splitting). Leave it blank on issues with children.
