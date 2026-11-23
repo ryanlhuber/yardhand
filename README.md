@@ -102,6 +102,6 @@ Every command takes `--help`. [All commands and flags →](https://github.com/ry
 
 - [Issues viewer](https://github.com/ryanlhuber/yardhand/blob/main/docs/viewer.md): a local board for people who'd rather not use the terminal
 - [AI tools](https://github.com/ryanlhuber/yardhand/blob/main/docs/ai-tools.md): optional `AGENTS.md` rules and skills for Claude Code, Codex and others
-- [Upgrading](https://github.com/ryanlhuber/yardhand/blob/main/docs/upgrading.md) from older versions
+- [Upgrading](https://github.com/ryanlhuber/yardhand/blob/main/docs/upgrading.md) from older versions, and the [changelog](https://github.com/ryanlhuber/yardhand/blob/main/CHANGELOG.md)
 - [Develop](https://github.com/ryanlhuber/yardhand/blob/main/docs/develop.md): working on yardhand itself
 - [SPEC.md](https://github.com/ryanlhuber/yardhand/blob/main/SPEC.md): the source of truth for every rule

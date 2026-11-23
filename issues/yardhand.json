@@ -1,0 +1,23 @@
+{
+  "statuses": [
+    "backlog",
+    "ready",
+    "in-progress",
+    "done"
+  ],
+  "labels": [
+    "cli",
+    "ui",
+    "docs",
+    "ci",
+    "spec"
+  ],
+  "assignees": {
+    "@ryan": "person"
+  },
+  "agents": [
+    "claude-code",
+    "codex",
+    "opencode"
+  ]
+}
