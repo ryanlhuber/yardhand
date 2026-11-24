@@ -12,7 +12,7 @@ depends-on:         # issue IDs, e.g. [017.01.01, 017.02]
 related:            # issue IDs
 assignee: "@claude-opus" # "@handle" from issues/yardhand.json, e.g. "@claude-opus"
 effort: high        # free text, one word, e.g. low | medium | high | xhigh
-released-in:        # set by `release`
+released-in: 0.5.1  # set by `release`
 ---
 
 # Keep yardhand simple as it grows
