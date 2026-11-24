@@ -1,8 +1,14 @@
 # Changelog
 
-What changed in each release. Starting with the next release, the issues behind each version are listed in `issues/releases/<version>.md`, written by `yardhand release`.
+What changed in each release. From 0.5.1 on, the issues behind each version are listed in `issues/releases/<version>.md`, written by `yardhand release`.
 
 ## Unreleased
+
+Nothing yet.
+
+## 0.5.1 (2026-11-23)
+
+Issues: [issues/releases/0.5.1.md](issues/releases/0.5.1.md). No changes to how the CLI behaves.
 
 - **Docs:** the README is now a short overview, and the full guide lives in `docs/`.
 - **CI:** tests now run on Windows and macOS as well as Ubuntu.
